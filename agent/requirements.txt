@@ -1,0 +1,7 @@
+# Python 3.13 권장 (3.15는 torch 휠이 없을 수 있음)
+mss>=10
+numpy>=2
+opencv-python-headless>=4.10
+easyocr>=1.7
+requests>=2.32
+dxcam>=0.0.5   # Windows 고속 캡처 (없으면 mss로 자동 전환)
