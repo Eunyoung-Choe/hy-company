@@ -45,7 +45,10 @@ def main() -> None:
         return {
             "sharing": stats.sharing.is_set(),
             "capture_fps": stats.capture.value(),
+            "capture_backend": stats.capture_backend,
             "output_fps": stats.output.value(),
+            "changed_fps": stats.changed.value(),
+            "output_ms": round(stats.output_ms, 1),
             "ocr_fps": stats.ocr.value(),
             "ocr_latency_ms": round(v.latency_ms),
             "ocr_ready": stats.ocr_ready,

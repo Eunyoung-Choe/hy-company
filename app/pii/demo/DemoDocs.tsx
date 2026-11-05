@@ -95,11 +95,7 @@ export default function DemoDocs() {
 
   return (
     <div className="demo">
-      <div className="demo-bar">
-        <div>
-          <strong>고객 상담 콘솔</strong>
-          <span className="muted"> · 시연용 가짜 개인정보</span>
-        </div>
+      <div className="demo-bar" style={{ justifyContent: 'flex-end' }}>
         <button type="button" onClick={() => setC(randomCustomer())}>새 고객 불러오기</button>
       </div>
 

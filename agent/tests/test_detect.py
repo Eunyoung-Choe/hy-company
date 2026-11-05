@@ -212,3 +212,52 @@ class ScrollCompensation(unittest.TestCase):
         out, pending = mask_frame(cur.copy(), self.v)
         self.assertFalse((out[150:170, 200:380] == 5).all())  # 원본 그대로 송출되지 않음
         self.assertGreaterEqual(pending, 2)
+
+
+class AddressOcrNoise(unittest.TestCase):
+    """실측한 Windows OCR 오인식에서도 주소 끝(층수)까지 가리는지."""
+
+    def addr(self, text):
+        return [text[s:e] for k, s, e in find_spans(text) if k == "ADDRESS"]
+
+    def test_floor_misread(self):
+        for t in ("서울특별시 성동구 왕십리로 222 3좋", "대전광역시 유성구 대학로 99 12증",
+                  "서을특별시 강남구 테해란로 152 7 증", "경기도 성남시 부 당구 판교 역로 235 3좋",
+                  "이진국광역시 연丁구 -도과학로 32 3증", "서울특별시 A러동구 왕치리로 222 7증"):
+            got = self.addr(t)
+            self.assertTrue(got and t.endswith(got[0]), (t, got))
+
+    def test_floor_does_not_eat_phone(self):
+        t = "서울특별시 성동구 왕십리로 222 3층 010-1234-5678"
+        self.assertEqual(self.addr(t), ["서울특별시 성동구 왕십리로 222 3층"])
+        self.assertIn("PHONE", kinds(t))
+
+    def test_not_address(self):
+        for t in ("경기 결과 3대 2 승리", "부산 지사 3층 회의실", "강남역 2번 출구 앞에서 만나요"):
+            self.assertEqual(self.addr(t), [], t)
+
+    def test_split_line_is_merged(self):
+        from pii_guard.detect import detect_words
+        # OCR이 한 줄을 두 덩어리로 끊어 읽은 경우: '인천광역시 연수구' | '송도과학로 32 3층'
+        lines = [[("인천광역시", (10, 10, 80, 30)), ("연수구", (88, 10, 130, 30))],
+                 [("송도과학로", (140, 10, 210, 30)), ("32", (218, 10, 232, 30)), ("3층", (240, 10, 262, 30))]]
+        (hit,) = [h for h in detect_words(lines, pad=0) if h.kind == "ADDRESS"]
+        self.assertLessEqual(hit.box[0], 10)
+        self.assertGreaterEqual(hit.box[2], 262)
+
+
+class DigitGapOcrNoise(unittest.TestCase):
+    """OCR이 숫자 사이에 끼워 넣은 띄어쓰기 (실측)에도 주민번호·OTP를 통째로 가리는지."""
+
+    def test_rrn_with_gaps(self):
+        for t in ("670620-1 109281", "96061 1-2979711", "8201 1 5-2291703"):
+            self.assertEqual(find_spans(t), [("RRN", 0, len(t))], t)
+
+    def test_otp_with_gaps(self):
+        for t in ("OTP 01 4620", "OTP 1 68493"):
+            self.assertEqual(find_spans(t), [("CVC_OTP", 4, len(t))], t)
+
+    def test_spaced_numbers_untouched(self):
+        self.assertEqual(kinds("4111 1111 1111 1111"), ["CARD"])
+        self.assertEqual(kinds("010 1234 5678"), ["PHONE"])
+        self.assertEqual(kinds("가입일 2024 03 02"), [])

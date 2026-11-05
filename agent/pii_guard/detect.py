@@ -19,28 +19,40 @@ class Hit:
 _DATE6 = r"\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"
 
 # ---------- 주소 ----------
+# OCR은 주소 글자를 자주 잘못 읽는다 (실측: '3층'→'3좋'/'1죠'/'7 증'/'1-', '서울'→'서。'/'서을',
+# '분당구 판교역로'→'부 당구 판교 역로'). 그래서 정규식이 이런 오인식을 견디도록 만든다.
+
 # 시·도: 뒤의 \S* 가 특별시/광역시/특별자치시/특별자치도/도/시 를 모두 받는다 (서울특별시, 서울시, 서울 모두 매칭)
-_SIDO = (r"(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청?북|충청?남|"
+_SIDO = (r"(?:서[울을]|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청?북|충청?남|"
          r"전라?북|전라?남|경상?북|경상?남|제주)")
-# 시·도와 도로명 사이: 시/군/구로 끝나는 행정구역만 허용 (OCR이 '서울 특별시'로 띄어 읽어도 통과)
-#   → '서울 출장 가는 길' 같은 일반 문장은 '출장'이 행정구역이 아니라서 걸리지 않는다
-_MID = r"(?:[가-힣]{1,6}(?:시|군|구|도|읍|면)\s+){0,3}"
+# 시·도 이름이 깨져도('서。특별시') 특별시/광역시/특별자치시·도에서 시작할 수 있게
+_START = rf"(?:{_SIDO}\S*|(?<!\S)\S{{0,3}}?\s?(?:특별시|광역시|특별자치[시도]))"
+# 시·도와 도로명 사이: 시/군/구/도/읍/면으로 끝나는 행정구역, 또는 OCR이 끊어 읽은 1~2글자 조각
+#   (일반 문장 오탐은 아래 _valid에서 '번지수나 시·군·구가 있어야 주소'로 걸러낸다)
+#   깨진 글자가 섞여도(연丁구, A러동구) 받는다
+_MID = r"(?:(?:[^\s\d,()]{1,6}(?:시|군|구|도|읍|면)|[^\s\d,()]{1,2})\s+){0,5}"  # 숫자는 불가 (경기 결과 3대 2 승리)
 # 도로명/지번: 테헤란로, 테헤란로7길, 을지로3가, 역삼동, 송도동, 봉담읍 ...
-_ROAD = r"[가-힣A-Za-z0-9]+(?:로|길|동|읍|면|리|가)"
+# OCR이 가운데 글자를 깨뜨려도(판교靈로, -도과학로) 받도록 공백·괄호·쉼표 외 아무 글자나 허용
+_ROAD = r"[^\s,()]+(?:로|길|동|읍|면|리|가)"
 # 건물번호/지번: 152, 24-5, 산 12, 823-1번지
 _NUM = r"(?:\s*(?:산\s?)?\d{1,5}(?:-\d{1,5})?(?:\s?번지)?)"
-# 상세주소 (여러 개 연속 가능): (백현동) / 12층 / 1203호 / 101동 / B동 / 지하 1층 / B1층 / 3F / 롯데월드타워
-_DETAIL_ONE = (r"(?:\([^)]{1,20}\)"
-               r"|(?:지하|B)\s?\d{1,2}\s?층"
-               r"|[A-Za-z]?\d{1,5}\s?(?:층|호|동|F)"
-               r"|[A-Za-z가-힣]\s?동(?!\S)"
+# 상세주소 한 조각 (여러 개 연속 가능)
+_DETAIL_ONE = (r"(?:\([^)]{1,20}\)"                                   # (백현동)
+               r"|(?:지하|B)\s?\d{1,2}(?:\s?[^\s\d,.()\-]{1,2})?(?!\S)"  # 지하 1층, B1층
+               # 12층 / 1203호 / 101동 / 3F / 101-1203 / OCR 오인식 3좋·7 증 (숫자 뒤 1~2글자).
+               # 조각이 공백·줄 끝에서 끝나야 한다 → 바로 뒤 전화번호(010-1234-5678)는 먹지 않는다
+               r"|[A-Za-z]?\d{1,4}(?:-\d{1,4})?(?:\s?[^\s\d,.()\-]{1,2})?(?!\S)"
+               r"|\d{1,4}-(?!\S)"                                    # '1층'을 '1-'로 읽은 경우
+               r"|[A-Za-z가-힣]\s?동(?!\S)"                           # B동, 가동
+               r"|지하(?!\S)"
                r"|[가-힣A-Za-z0-9]{1,12}(?:빌딩|타워|아파트|빌라|오피스텔|맨션|센터|프라자|플라자|하우스|"
                r"캐슬|자이|힐스테이트|푸르지오|래미안|오피스))")
 _DETAIL = rf"(?:(?:\s*,\s*|\s+){_DETAIL_ONE})*"
+DETAIL_ONLY_RE = re.compile(rf"\s*{_DETAIL_ONE}(?:(?:\s*,\s*|\s+){_DETAIL_ONE})*\s*")
 
 ADDRESS_RE = re.compile(
     # 1) 시·도로 시작: 서울특별시 성동구 왕십리로 222 3층
-    rf"{_SIDO}\S*\s+{_MID}{_ROAD}{_NUM}?{_DETAIL}"
+    rf"{_START}\s+{_MID}{_ROAD}{_NUM}?{_DETAIL}"
     # 2) 시·도 생략: 강남구 테헤란로 152 / 강남구 역삼동 823-1 4층
     #    (일반 문장과 헷갈리지 않게 도로명+번호, 또는 동+지번(하이픈)만 허용)
     rf"|(?<![가-힣])[가-힣]{{1,5}}(?:시|군|구)\s+{_MID}"
@@ -51,7 +63,7 @@ ADDRESS_RE = re.compile(
 
 PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # 주소 라벨이 같은 줄에 있으면 라벨 뒤 전체를 가린다 (정규식이 모르는 형식의 주소도 놓치지 않게)
-    ("ADDRESS", re.compile(r"^\s*(?:주소|거주지|배송지|자택\s?주소|현\s?주소)\s*[:：]?\s*(\S.*?)\s*$")),
+    ("ADDRESS_LABEL", re.compile(r"^\s*(?:주소|거주지|배송지|자택\s?주소|현\s?주소)\s*[:：]?\s*(\S.*?)\s*$")),
     # 주소는 숫자 패턴(계좌 일부 등)보다 먼저 검사한다. '송도동 24-56'의 '24-56'을
     # 계좌번호 조각이 먼저 가져가면 겹침 검사 때문에 주소 전체가 빠지기 때문.
     ("ADDRESS", ADDRESS_RE),
@@ -113,6 +125,9 @@ def luhn_ok(digits: str) -> bool:
 
 def _valid(kind: str, matched: str) -> bool:
     digits = re.sub(r"\D", "", matched)
+    if kind == "ADDRESS":
+        # '서울 출장 가는 길' 같은 일반 문장 제외: 번지수(숫자)나 시·군·구가 있어야 주소로 본다
+        return bool(re.search(r"\d", matched) or re.search(r"\s[가-힣]{2,6}(?:시|군|구)(?=\s|$)", matched))
     if kind == "CARD":
         return "*" in matched or bool(re.search(r"[\s-]", matched)) or luhn_ok(digits)
     if kind in ("ACCOUNT", "ACCOUNT_PART"):
@@ -132,11 +147,9 @@ def _valid(kind: str, matched: str) -> bool:
 _DATE_LIKE = re.compile(r"^(?:19|20)\d{2}-(?:0?[1-9]|1[0-2])(?:-(?:0?[1-9]|[12]\d|3[01]))?$")
 
 
-def find_spans(text: str) -> list[tuple[str, int, int]]:
-    t = normalize(text)
+def _scan(t: str) -> list[tuple[str, int, int]]:
     taken: list[tuple[int, int]] = []
     out: list[tuple[str, int, int]] = []
-
     for kind, pat in PATTERNS:
         for m in pat.finditer(t):
             # 그룹이 있는 패턴(CVC_OTP, 주소 라벨)은 라벨을 빼고 값 부분만 가린다
@@ -150,8 +163,44 @@ def find_spans(text: str) -> list[tuple[str, int, int]]:
                 continue
 
             taken.append((s, e))
-            out.append((kind, s, e))
+            out.append(("ADDRESS" if kind == "ADDRESS_LABEL" else kind, s, e))
+    return out
 
+
+_DIGIT_GAP = re.compile(r"(?<=\d) (?=\d)")
+
+
+def _close_digit_gaps(t: str) -> tuple[str, list[int]] | None:
+    """OCR이 숫자 사이에 끼워 넣은 띄어쓰기를 지운다 (실측: '670620-1 109281', 'OTP 01 4620', '8201 1 5-2291703').
+    1~2자리 숫자 조각에 붙은 공백만 지워서, 원래 띄어 쓰는 카드번호(4111 1111 …)·전화번호(010 1234 5678)는 그대로 둔다.
+    반환: (고친 문자열, 고친 문자열의 각 글자가 원래 문자열에서 몇 번째였는지) / 고칠 것이 없으면 None"""
+    drop = set()
+    for m in _DIGIT_GAP.finditer(t):
+        i = m.start()
+        left = len(re.search(r"\d+$", t[:i]).group())
+        right = len(re.match(r"\d+", t[i + 1:]).group())
+        if left <= 2 or right <= 2:
+            drop.add(i)
+    if not drop:
+        return None
+    idx = [i for i in range(len(t)) if i not in drop]
+    return "".join(t[i] for i in idx), idx
+
+
+def find_spans(text: str) -> list[tuple[str, int, int]]:
+    t = normalize(text)
+    out = _scan(t)
+    fixed = _close_digit_gaps(t)
+    if fixed is None:
+        return out
+    # 띄어쓰기를 지운 글에서 더 찾은 것을 원래 위치로 옮겨 합친다.
+    # 원래 글에서 일부만 잡힌 것(예: 계좌 조각)을 통째로 덮는 결과면 그것으로 바꾼다.
+    ct, idx = fixed
+    for kind, s, e in _scan(ct):
+        s, e = idx[s], idx[e - 1] + 1
+        overlap = [o for o in out if s < o[2] and o[1] < e]
+        if all(s <= o[1] and o[2] <= e for o in overlap) and not any(o[1] == s and o[2] == e for o in overlap):
+            out = [o for o in out if o not in overlap] + [(kind, s, e)]
     return out
 
 
@@ -247,22 +296,90 @@ def detect_words(ocr_lines: list[list[tuple[str, Box]]], pad: int = 1) -> list[H
     단어별 실제 박스를 쓰므로 글자 폭을 추정하는 것보다 정확하다.
     매칭이 단어 일부에만 걸치면 그 단어 안에서만 글자 폭으로 잘라낸다."""
     hits: list[Hit] = []
-    lines: list[tuple[Box, str]] = []
-    for words in ocr_lines:
-        if not words:
-            continue
+    ocr_lines = _merge_rows([w for w in ocr_lines if w])
+    lines: list[tuple[Box, str]] = [(_union([wb for _, wb in w]), " ".join(wt for wt, _ in w)) for w in ocr_lines]
+    for words, (_, text) in zip(ocr_lines, lines):
         ranges, pos = [], 0
         for wt, wb in words:
             ranges.append((pos, pos + len(wt), wt, wb))
             pos += len(wt) + 1
-        text = " ".join(wt for wt, _ in words)
-        lines.append((_union([wb for _, wb in words]), text))
         for kind, s, e in find_spans(text):
+            if kind == "ADDRESS":
+                # 앞쪽 보강: OCR이 시·도 이름을 깨뜨리면('혁百특풀시', '인 전광역시') 매칭이 단어 중간이나
+                # 다음 단어에서 시작한다 → 단어 처음까지, 바로 앞 1~2글자 조각까지 넓힌다
+                i = next((k for k, (a, b, _, _) in enumerate(ranges) if a <= s < b), None)
+                if i is not None:
+                    s = ranges[i][0]
+                    if i > 0 and len(ranges[i - 1][2]) <= 2:
+                        s = ranges[i - 1][0]
             parts = [sub_box(_corners(wb), wt, max(s, a) - a, min(e, b) - a, pad=pad)
                      for a, b, wt, wb in ranges if a < e and s < b]
-            if parts:
-                hits.append(Hit(kind, _union(parts)))
+            if not parts:
+                continue
+            box = _union(parts)
+            if kind == "ADDRESS":
+                # OCR이 첫 글자를 아예 못 읽는 경우가 있어(부산광역시 → 산광역시) 왼쪽으로 글자 반 개 정도 더 덮는다
+                gh = box[3] - box[1]
+                box = (max(0, box[0] - round(0.6 * gh)), box[1], box[2], box[3])
+                if text[:e].rstrip()[-1:].isdigit():  # 숫자로 끝남 → '층/호' 글자를 OCR이 놓쳤을 수 있다
+                    box = (box[0], box[1], box[2] + round(0.9 * gh), box[3])
+                # OCR이 따로 떼어 읽은 같은 줄 조각도 같이 가린다: 오른쪽 '3층', 왼쪽 '경기도 성남시'
+                if not text[e:].strip():
+                    box = _row_extend(box, lines, lambda t: bool(DETAIL_ONLY_RE.fullmatch(t)), pad)
+                if not text[:s].strip():
+                    box = _row_extend(box, lines, _region_piece, pad, side="left")
+            hits.append(Hit(kind, box))
     return hits + _label_hits(lines, pad)
+
+
+def _merge_rows(ocr_lines: list[list[tuple[str, Box]]]) -> list[list[tuple[str, Box]]]:
+    """같은 줄에서 가깝게 붙어 있는 OCR 덩어리를 한 줄로 합친다.
+    OCR이 '인천광역시 연수구' | '송도과학로 32 3층'처럼 한 줄을 끊어 읽으면 어느 쪽도 주소 모양이 아니어서
+    정규식이 놓치기 때문. 간격이 글자 높이의 2.5배 이내일 때만 합쳐 다른 칸(표의 열)과는 섞지 않는다."""
+    merged: list[list] = []  # [words, x0, y0, x1, y1]
+    for words in sorted(ocr_lines, key=lambda w: _union([b for _, b in w])[0]):
+        x0, y0, x1, y1 = _union([b for _, b in words])
+        h = max(1, y1 - y0)
+        for m in merged:
+            mh = max(1, m[4] - m[2])
+            same_row = min(y1, m[4]) - max(y0, m[2]) > 0.5 * min(h, mh)
+            if same_row and m[3] - 4 <= x0 <= m[3] + 2.5 * max(h, mh):
+                m[0] = m[0] + list(words)
+                m[2], m[3], m[4] = min(m[2], y0), max(m[3], x1), max(m[4], y1)
+                break
+        else:
+            merged.append([list(words), x0, y0, x1, y1])
+    return [m[0] for m in merged]
+
+
+def _region_piece(t: str) -> bool:
+    """주소 왼쪽에 떨어져 읽힌 조각인지: '경기도 성남시' 같은 행정구역, 또는 1~3글자 파편 (라벨 '주소'는 제외)."""
+    t = t.strip()
+    if any(lr.search(t) for k, lr, _ in LABELS if k == "ADDRESS"):
+        return False
+    return len(t) <= 3 or bool(re.fullmatch(r"(?:\S{1,6}(?:시|도|군|구)\s?){1,3}", t))
+
+
+def _row_extend(box: Box, lines: list[tuple[Box, str]], accept, pad: int, side: str = "right") -> Box:
+    """box와 같은 줄에서 오른쪽(또는 왼쪽)에 바로 붙은 조각을 합친다.
+    OCR이 한 줄을 여러 덩어리로 끊어 읽어도('…왕십리로 222' | '3층') 값 전체를 가리기 위함."""
+    x0, y0, x1, y1 = box
+    h = max(1, y1 - y0)
+    grown = True
+    while grown:
+        grown = False
+        for b, t in lines:
+            bh = max(1, b[3] - b[1])
+            same_row = min(y1, b[3]) - max(y0, b[1]) > 0.5 * min(h, bh)
+            if not same_row or not accept(t):
+                continue
+            if side == "right" and x1 - 2 * pad - 4 <= b[0] < x1 + 2.5 * h and b[2] > x1:
+                x1, y0, y1 = b[2] + pad, min(y0, b[1] - pad), max(y1, b[3] + pad)
+                grown = True
+            elif side == "left" and x0 - 2.5 * h < b[2] <= x0 + 2 * pad + 4 and b[0] < x0:
+                x0, y0, y1 = max(0, b[0] - pad), min(y0, b[1] - pad), max(y1, b[3] + pad)
+                grown = True
+    return x0, max(0, y0), x1, y1
 
 
 def _label_hits(lines: list[tuple[Box, str]], pad: int) -> list[Hit]:
@@ -279,6 +396,7 @@ def _label_hits(lines: list[tuple[Box, str]], pad: int) -> list[Hit]:
 
             j = _value_box_for(box, lines, value_re)
             if j is not None:
-                hits.append(Hit(kind, _pad(lines[j][0], pad=pad)))
+                # 값이 같은 줄에서 여러 덩어리로 끊겨 읽혀도 이어진 조각까지 모두 가린다
+                hits.append(Hit(kind, _row_extend(_pad(lines[j][0], pad=pad), lines, lambda t: True, pad)))
 
     return hits

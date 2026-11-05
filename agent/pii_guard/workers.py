@@ -59,6 +59,9 @@ class AuditItem:
 class Stats:
     def __init__(self):
         self.capture = Rate()
+        self.changed = Rate()      # 화면이 실제로 바뀌어 링 버퍼에 쓴 프레임 수 (송출이 따라가야 할 양)
+        self.output_ms = 0.0       # 송출 한 장 처리 시간 (지수 평균)
+        self.capture_backend = ""  # dxcam(빠름) / mss(느림)
         self.output = Rate()
         self.ocr = Rate()
         self.pending_regions = 0
@@ -104,18 +107,33 @@ def _dxcam_grabber(cfg: Config, rect: dict):
     return lambda: cam.grab(region=region), cam
 
 
-def capture_loop(cfg: Config, rect: dict, ring: RingBuffer, stats: Stats, stop: threading.Event) -> None:
-    import mss
+DXCAM_RETRY_SEC = 5.0  # mss로 바뀐 뒤 dxcam을 다시 시도하는 간격
 
+
+def capture_loop(cfg: Config, rect: dict, ring: RingBuffer, stats: Stats, stop: threading.Event) -> None:
+    """dxcam(빠름)을 우선 쓰고, 막히면 mss(느림)로 바꾼다.
+    화면 잠금·UAC 창 등으로 dxcam이 '액세스 거부'되면 mss로 버티다가 DXCAM_RETRY_SEC마다 dxcam을 다시 시도한다.
+    (예전에는 한 번 mss로 바뀌면 에이전트를 재시작해야 원래 속도로 돌아왔다)"""
     period = 1.0 / cfg.fps
-    grab, cam = None, None
-    if cfg.capture_backend in ("auto", "dxcam"):
-        try:
-            grab, cam = _dxcam_grabber(cfg, rect)
-            log.info("캡처: dxcam (Desktop Duplication)")
-        except Exception as ex:
-            log.warning("dxcam 사용 불가 → mss 사용 (%s)", ex)
-    if grab is not None:
+    want_dxcam = cfg.capture_backend in ("auto", "dxcam")
+    while not stop.is_set():
+        if want_dxcam and _run_dxcam(cfg, rect, ring, stats, stop, period):
+            return  # stop
+        _run_mss(rect, ring, stats, stop, period, until=time.monotonic() + DXCAM_RETRY_SEC if want_dxcam else None)
+
+
+def _run_dxcam(cfg, rect, ring, stats, stop, period) -> bool:
+    """dxcam으로 캡처. stop이면 True, dxcam이 안 되면 False."""
+    try:
+        grab, cam = _dxcam_grabber(cfg, rect)
+    except Exception as ex:
+        if stats.capture_backend != "mss":
+            log.warning("dxcam 사용 불가 → mss 사용, %.0f초마다 다시 시도 (%s)", DXCAM_RETRY_SEC, ex)
+        return False
+    if stats.capture_backend != "dxcam":
+        log.info("캡처: dxcam (Desktop Duplication)")
+    stats.capture_backend = "dxcam"
+    try:
         while not stop.is_set():
             if not stats.sharing.is_set():  # 원격 꺼짐 → 화면을 읽지 않음
                 time.sleep(0.1)
@@ -124,13 +142,29 @@ def capture_loop(cfg: Config, rect: dict, ring: RingBuffer, stats: Stats, stop: 
             frame = grab()
             if frame is not None:  # 화면이 바뀐 경우에만 덮어쓰기
                 ring.write(frame)
+                stats.changed.tick()
                 del frame
             stats.capture.tick()
             time.sleep(max(0.0, period - (time.perf_counter() - t0)))
-        return
-    log.info("캡처: mss (GDI)")
+        return True
+    except Exception as ex:  # 실행 중 화면 잠금 등으로 끊기면 mss로
+        log.warning("dxcam 캡처 중단 → mss 사용 (%s)", ex)
+        return False
+    finally:
+        try:
+            cam.release()
+        except Exception:
+            pass
+
+
+def _run_mss(rect, ring, stats, stop, period, until: float | None) -> None:
+    import mss
+
+    if stats.capture_backend != "mss":
+        log.info("캡처: mss (GDI)")
+    stats.capture_backend = "mss"
     with _mss(mss) as sct:  # mss 인스턴스는 스레드마다 따로 만들어야 한다
-        while not stop.is_set():
+        while not stop.is_set() and (until is None or time.monotonic() < until):
             if not stats.sharing.is_set():  # 원격 꺼짐 → 화면을 읽지 않음
                 time.sleep(0.1)
                 continue
@@ -138,6 +172,7 @@ def capture_loop(cfg: Config, rect: dict, ring: RingBuffer, stats: Stats, stop: 
             shot = sct.grab(rect)
             bgra = np.frombuffer(shot.raw, dtype=np.uint8).reshape(shot.height, shot.width, 4)
             ring.write(bgra[:, :, :3])
+            stats.changed.tick()
             del shot, bgra
             stats.capture.tick()
             time.sleep(max(0.0, period - (time.perf_counter() - t0)))
@@ -442,6 +477,7 @@ def output_loop(cfg: Config, ring: RingBuffer, state: VerifiedState, out: Latest
         new_seq, frame = ring.read_latest_resized(cfg.stream_scale, after=-1 if force else seq, timeout=0.05)
         if frame is None:
             continue
+        t0 = time.perf_counter()
         seq = new_seq
         seen_version = state.version
         masked, pending = mask_frame(frame, state.get())
@@ -453,6 +489,7 @@ def output_loop(cfg: Config, ring: RingBuffer, state: VerifiedState, out: Latest
         if ok:
             out.put(jpg.tobytes())  # 마스킹된 결과물만 송출 버퍼로 간다
             stats.output.tick()
+        stats.output_ms = 0.9 * stats.output_ms + 0.1 * (time.perf_counter() - t0) * 1000
 
 
 # ---------- 4단계(감사 로그): 데몬 스레드 → Supabase ----------
