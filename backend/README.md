@@ -1,12 +1,12 @@
 # VideoDigest 백엔드 (Google Colab + ngrok)
 
-OpenCV → DINOv2 → Qwen2.5-VL-3B(캡션) → Qwen2.5-VL-3B(텍스트 요약) 4단계 파이프라인 Flask API.
-3·4단계는 Colab GPU에서 로컬 실행합니다 (API 키·비용 없음). `CAPTION_BACKEND=openai`로 gpt-5-mini API를 쓸 수도 있습니다.
+OpenCV → DINOv2 → gpt-5.4-mini(캡션) → gpt-5.4-mini(텍스트 요약) 4단계 파이프라인 Flask API.
+1·2단계로 영상 대부분을 걸러 내고, 남은 키프레임만 저해상도로 GPT에 보내 토큰을 아낍니다.
 
 ## Colab에서 실행
 
 1. `colab_backend.ipynb`를 Colab에서 엽니다 (파일 → 노트북 업로드).
-2. 런타임 → 런타임 유형 변경 → **T4 GPU**. 왼쪽 🔑 Secrets에 `NGROK_AUTHTOKEN`, (권장) `NGROK_DOMAIN`을 추가하고 노트북 액세스를 켭니다.
+2. 왼쪽 🔑 Secrets에 `OPENAI_API_KEY`, `NGROK_AUTHTOKEN`, (권장) `NGROK_DOMAIN`을 추가하고 노트북 액세스를 켭니다. 모델 단가는 `PRICE_INPUT_PER_1M`, `PRICE_OUTPUT_PER_1M`으로 맞춥니다. (T4 GPU는 선택 — DINOv2가 빨라짐)
 3. 런타임 → 모두 실행 → 마지막 셀의 `🌐 공개 API URL` 확인.
 4. 그 주소를 프론트엔드 `NEXT_PUBLIC_API_URL`에 넣습니다 (로컬은 `.env.local`, 배포는 Vercel 환경변수 + 재배포).
 

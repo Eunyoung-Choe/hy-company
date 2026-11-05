@@ -3,12 +3,8 @@
 
   1단계  OpenCV   : 1fps 샘플링 + 픽셀 변화(absdiff)로 정지 프레임 드롭        (CPU, 초경량)
   2단계  DINOv2   : ViT-S/14(dinov2_vits14 = facebook/dinov2-small) 코사인 유사도로 장면 전환만 키프레임
-  3단계  캡션     : 키프레임만 저해상도로 VLM에 넣어 1줄 캡션
-  4단계  요약     : 시간순 캡션 텍스트만으로 최종 요약 (이미지 재전송 없음)
-
-  3·4단계 엔진 (업로드마다 form 필드 "engine"으로 선택, 기본값은 CAPTION_BACKEND)
-    local  (기본) Qwen2.5-VL-3B-Instruct를 Colab GPU에서 직접 실행 → API 키·비용 없음
-    openai        OpenAI API (OPENAI_MODEL, 기본 gpt-5.4-mini · OPENAI_API_KEY가 있을 때만 사용 가능)
+  3단계  GPT 비전  : 키프레임만 저해상도(detail=low) Base64로 보내 1줄 캡션  (OPENAI_MODEL, 기본 gpt-5.4-mini)
+  4단계  GPT 텍스트: 시간순 캡션 텍스트만으로 최종 요약 (이미지 재전송 없음)
 
 API
   GET  /                 상태 확인
@@ -18,7 +14,7 @@ API
 비밀값은 환경변수로만 받습니다 (Colab Secrets 또는 로컬 .env). 코드에 키를 적지 마세요.
   NGROK_AUTHTOKEN  있으면 ngrok 터널을 열어 외부 URL 발급
   NGROK_DOMAIN     선택 · ngrok 무료 고정 도메인(xxx.ngrok-free.dev) → 매번 같은 URL
-  OPENAI_API_KEY   선택 · 있으면 화면에서 GPT 엔진을 고를 수 있음
+  OPENAI_API_KEY   필수 · 3·4단계 GPT 호출
 """
 from __future__ import annotations
 
@@ -40,7 +36,6 @@ import torch.nn.functional as F
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from PIL import Image
 from transformers import AutoModel
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -62,18 +57,11 @@ DINO_MODEL_ID = os.getenv("DINO_MODEL_ID", "facebook/dinov2-small")
 DINO_SIM_THRESHOLD = env_float("DINO_SIM_THRESHOLD", 0.85)     # 2단계: 코사인 유사도 미만이면 키프레임
 DINO_BATCH = env_int("DINO_BATCH", 16)
 MAX_KEYFRAMES = env_int("MAX_KEYFRAMES", 24)                   # 캡션 호출 수 상한
-CAPTION_MAX_SIDE = env_int("CAPTION_MAX_SIDE", 512)            # 3단계 이미지 긴 변(px)
-CAPTION_BACKEND = os.getenv("CAPTION_BACKEND", "local").strip().lower()   # local | openai
-# local (Qwen2.5-VL)
-LOCAL_VLM_ID = os.getenv("LOCAL_VLM_ID", "Qwen/Qwen2.5-VL-3B-Instruct")
-VLM_MAX_PIXELS = env_int("VLM_MAX_PIXELS", 448 * 448)          # 이미지 토큰 상한 (448² ≈ 256토큰)
-VLM_MIN_PIXELS = env_int("VLM_MIN_PIXELS", 224 * 224)
-VLM_DTYPE = os.getenv("VLM_DTYPE", "auto").strip().lower()     # auto | float16 | bfloat16 | float32
-# openai
+CAPTION_MAX_SIDE = env_int("CAPTION_MAX_SIDE", 512)            # 3단계 전송 이미지 긴 변(px)
 CAPTION_WORKERS = env_int("CAPTION_WORKERS", 4)
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "none").strip().lower()  # 안 받으면 자동 재시도
-# 비용 환산용 단가(USD / 1M 토큰). local이면 실제 청구는 0원이고, 'API로 처리했다면' 환산에만 씀
+# 비용 계산용 단가(USD / 1M 토큰) — 사용하는 모델의 OpenAI 가격표 값으로 맞추세요
 PRICE_INPUT_PER_1M = env_float("PRICE_INPUT_PER_1M", 0.25)
 PRICE_OUTPUT_PER_1M = env_float("PRICE_OUTPUT_PER_1M", 2.00)
 BASELINE_FPS = env_float("BASELINE_FPS", 1.0)                  # '영상 통째로' 가정 시 프레임 기준
@@ -85,7 +73,6 @@ ALLOWED_ORIGINS = [o.strip() for o in os.getenv(
 PORT = env_int("PORT", 5000)                                   # ngrok이 이 포트를 외부로 연결
 
 CAPTION_PROMPT = "이 상황을 1줄로 묘사해 줘."
-SYSTEM_PROMPT = "너는 영상 장면을 설명하는 도우미야. 항상 자연스러운 한국어로만 간결하게 답해."
 SUMMARY_PROMPT = "다음은 영상의 시간대별 핵심 장면을 설명한 텍스트야. 이를 바탕으로 영상 전체 내용을 자연스러운 하나의 글로 요약해 줘."
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -279,103 +266,7 @@ def stage2_dino(frames: list[Frame], job_id: str) -> list[Frame]:
     return [frames[k] for k in keys]
 
 
-# ───────────────────────── 3·4단계 엔진 A: 로컬 Qwen2.5-VL ─────────────────────────
-_vlm = None
-_vlm_lock = threading.Lock()
-
-
-def vlm_dtype() -> torch.dtype:
-    if DEVICE != "cuda":
-        return torch.float32
-    if VLM_DTYPE in ("float16", "bfloat16", "float32"):
-        return getattr(torch, VLM_DTYPE)
-    # auto: Qwen2.5-VL은 fp16에서 값이 넘쳐 '!!!!'만 출력하는 경우가 있음 → 가능하면 bf16.
-    #   A100·L4 등(compute 8.0+)은 bf16 네이티브, T4는 PyTorch가 bf16을 에뮬레이션(조금 느리지만 안전)
-    if torch.cuda.get_device_capability()[0] >= 8 or torch.cuda.is_bf16_supported():
-        return torch.bfloat16
-    return torch.float16
-
-
-def get_vlm():
-    global _vlm
-    with _vlm_lock:
-        if _vlm is None:
-            from transformers import AutoProcessor
-            try:
-                from transformers import Qwen2_5_VLForConditionalGeneration as VLM
-            except ImportError:  # 클래스명이 바뀐 버전 대비
-                from transformers import AutoModelForImageTextToText as VLM
-            dtype = vlm_dtype()
-            log.info("[VLM] %s 로드 중 (첫 실행 시 약 7GB 다운로드) · device=%s · dtype=%s", LOCAL_VLM_ID, DEVICE, dtype)
-            if DEVICE != "cuda":
-                log.warning("[VLM] GPU가 없습니다. CPU로는 캡션 1장에 수 분이 걸릴 수 있어요 (Colab: 런타임 → T4 GPU)")
-            processor = AutoProcessor.from_pretrained(LOCAL_VLM_ID, min_pixels=VLM_MIN_PIXELS, max_pixels=VLM_MAX_PIXELS)
-            model = VLM.from_pretrained(LOCAL_VLM_ID, torch_dtype=dtype).eval().to(DEVICE)
-            _vlm = (processor, model)
-            log.info("[VLM] 준비 완료")
-    return _vlm
-
-
-@torch.inference_mode()
-def vlm_generate(prompt: str, image: Image.Image | None, max_new_tokens: int) -> tuple[str, int, int, int]:
-    """(응답, 입력 토큰, 출력 토큰, 이미지 토큰) — 토큰은 모델 입력에서 실제로 센 값."""
-    processor, model = get_vlm()
-    user = ([{"type": "image"}] if image is not None else []) + [{"type": "text", "text": prompt}]
-    messages = [{"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
-                {"role": "user", "content": user}]
-    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    inputs = processor(text=[text], images=[image] if image is not None else None, return_tensors="pt").to(DEVICE)
-    out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, repetition_penalty=1.05)
-    n_in = int(inputs["input_ids"].shape[1])
-    new_tokens = out[:, n_in:]
-    answer = processor.batch_decode(new_tokens, skip_special_tokens=True)[0].strip()
-    img_tokens = 0
-    if "image_grid_thw" in inputs:   # Qwen: (t·h·w 패치) / merge_size² = LLM에 들어간 이미지 토큰
-        merge = getattr(processor.image_processor, "merge_size", 2)
-        img_tokens = int(inputs["image_grid_thw"].prod(-1).sum()) // (merge * merge)
-    return answer, n_in, int(new_tokens.shape[1]), img_tokens
-
-
-CAPTION_FAILED = "(이 장면은 캡션 생성에 실패했어요)"
-
-
-def looks_broken(text: str) -> bool:
-    """수치 넘침(fp16 overflow) 때 나오는 '!!!!' 같은 무의미한 출력 감지."""
-    s = "".join(text.split())
-    return not s or (len(s) >= 3 and s.count("!") / len(s) > 0.5)
-
-
-def local_captions(keyframes: list[Frame], job_id: str, usage: Usage) -> tuple[list[dict], list[int]]:
-    set_progress(job_id, 3, 0.0, "Qwen2.5-VL 모델 준비 중")
-    get_vlm()
-    results, image_tokens = [], []
-    for i, f in enumerate(keyframes):
-        text = ""
-        for side in (CAPTION_MAX_SIDE, 336):   # 깨지면 해상도를 바꿔 한 번 재시도
-            rgb = cv2.cvtColor(resize_max(f.image, side), cv2.COLOR_BGR2RGB)
-            text, n_in, n_out, n_img = vlm_generate(CAPTION_PROMPT, Image.fromarray(rgb), max_new_tokens=64)
-            usage.add_counts(n_in, n_out)   # 재시도 토큰도 실제 사용량에 포함
-            if side == CAPTION_MAX_SIDE:
-                image_tokens.append(n_img)
-            log.info("[CAPTION] %s (side=%d, in=%d, img=%d, out=%d) %s", fmt_time(f.t), side, n_in, n_img, n_out, text)
-            if not looks_broken(text):
-                break
-            log.warning("[CAPTION] %s 깨진 출력 감지 → %s", fmt_time(f.t), "336px로 재시도" if side != 336 else "실패 처리")
-        failed = looks_broken(text)
-        results.append(keyframe_entry(f, CAPTION_FAILED if failed else text, failed))
-        set_progress(job_id, 3, (i + 1) / len(keyframes), f"캡션 {i + 1}/{len(keyframes)}")
-    return results, image_tokens
-
-
-def local_summary(prompt: str, usage: Usage) -> tuple[str, int]:
-    text, n_in, n_out, _ = vlm_generate(prompt, None, max_new_tokens=512)   # 이미지 없이 텍스트만
-    usage.add_counts(n_in, n_out)
-    if looks_broken(text):   # 숨기지 않고 오류로 알림
-        raise RuntimeError("요약 출력이 깨졌습니다(수치 넘침). Colab Secrets에 VLM_DTYPE=float32를 넣고 다시 실행해 보세요.")
-    return text, n_out
-
-
-# ───────────────────────── 3·4단계 엔진 B: OpenAI (선택) ─────────────────────────
+# ───────────────────────── 3·4단계: OpenAI GPT ─────────────────────────
 def openai_client():
     from openai import OpenAI
     return OpenAI()   # OPENAI_API_KEY 환경변수 사용
@@ -459,27 +350,18 @@ def keyframe_entry(f: Frame, caption: str, failed: bool = False) -> dict:
             "image": jpeg_b64(f.image, CAPTION_MAX_SIDE), "caption": caption or "(캡션이 비어 있음)"}
 
 
-def available_engines() -> list[str]:
-    engines = ["local"] if CAPTION_BACKEND == "local" else []   # openai 전용으로 켜면 Qwen을 로드하지 않음
-    if os.getenv("OPENAI_API_KEY"):
-        engines.append("openai")
-    return engines
+def stage3_captions(keyframes: list[Frame], job_id: str, usage: Usage) -> list[dict]:
+    return openai_captions(keyframes, job_id, usage)
 
 
-def stage3_captions(keyframes: list[Frame], job_id: str, usage: Usage, engine: str) -> tuple[list[dict], list[int]]:
-    if engine == "openai":
-        return openai_captions(keyframes, job_id, usage), []
-    return local_captions(keyframes, job_id, usage)
-
-
-def stage4_summary(captions: list[dict], job_id: str, usage: Usage, engine: str) -> tuple[str, int]:
+def stage4_summary(captions: list[dict], job_id: str, usage: Usage) -> tuple[str, int]:
     set_progress(job_id, 4, 0.1, "캡션 텍스트로 요약 중 (이미지 미전송)")
     usable = [c for c in captions if not c["failed"]]   # 실패한 캡션은 요약 입력에서 제외
     if not usable:
         raise RuntimeError("모든 장면의 캡션 생성에 실패했습니다. Colab 로그의 [CAPTION] 줄을 확인해 주세요.")
     timeline = "\n".join(f"[{c['time_label']}] {c['caption']}" for c in usable)   # 텍스트만!
     prompt = f"{SUMMARY_PROMPT}\n\n{timeline}"
-    summary, out_tokens = (openai_summary if engine == "openai" else local_summary)(prompt, usage)
+    summary, out_tokens = openai_summary(prompt, usage)
     set_progress(job_id, 4, 1.0, "완료")
     return summary, out_tokens
 
@@ -498,25 +380,17 @@ def cost(inp: int, out: int) -> float:
     return inp / 1e6 * PRICE_INPUT_PER_1M + out / 1e6 * PRICE_OUTPUT_PER_1M
 
 
-def build_metrics(stats: dict, usage: Usage, summary_out_tokens: int, image_tokens: list[int], engine: str) -> dict:
-    """'영상 통째로' 기준선은 같은 엔진의 토큰 계산 방식으로 잡아 사과-사과 비교."""
+def build_metrics(stats: dict, usage: Usage, summary_out_tokens: int) -> dict:
     baseline_frames = max(1, math.ceil(stats["duration"] * BASELINE_FPS))
-    local = engine != "openai"
-    if local and image_tokens:
-        per_frame = round(sum(image_tokens) / len(image_tokens))   # Qwen에 실제 들어간 프레임당 이미지 토큰
-        basis = f"모든 {BASELINE_FPS:g}fps 프레임을 같은 해상도로 Qwen2.5-VL에 넣었다고 가정"
-    else:
-        per_frame = image_tokens_high(stats["width"], stats["height"])
-        basis = f"모든 {BASELINE_FPS:g}fps 프레임을 detail=high로 {OPENAI_MODEL}에 보냈다고 가정"
+    per_frame = image_tokens_high(stats["width"], stats["height"])
+    basis = f"모든 {BASELINE_FPS:g}fps 프레임을 detail=high로 {OPENAI_MODEL}에 보냈다고 가정"
     baseline_in = baseline_frames * per_frame + 100       # +100: 프롬프트 텍스트 대략치
     baseline_out = summary_out_tokens                      # 같은 길이 요약을 출력한다고 가정
     actual = usage.input_tokens + usage.output_tokens
     baseline = baseline_in + baseline_out
     actual_cost, baseline_cost = cost(usage.input_tokens, usage.output_tokens), cost(baseline_in, baseline_out)
     return {
-        "backend": "local" if local else "openai",
-        "engine": LOCAL_VLM_ID if local else OPENAI_MODEL,
-        "billed_cost_usd": 0.0 if local else actual_cost,   # 실제 청구액 (로컬 모델은 0, API는 설정 단가 기준)
+        "engine": OPENAI_MODEL,
         "reasoning_tokens": usage.reasoning_tokens,
         "actual_tokens": actual,
         "actual_input_tokens": usage.input_tokens,
@@ -530,35 +404,35 @@ def build_metrics(stats: dict, usage: Usage, summary_out_tokens: int, image_toke
         "actual_cost_usd": actual_cost,
         "baseline_cost_usd": baseline_cost,
         "saved_cost_usd": baseline_cost - actual_cost,
-        "assumption": f"예상치: {basis}. 비용은 API 단가(입력 ${PRICE_INPUT_PER_1M}/1M · "
-                      f"출력 ${PRICE_OUTPUT_PER_1M}/1M)로 환산" + (" — 로컬 모델이라 실제 청구는 $0" if local else ""),
+        "assumption": f"예상치: {basis}. 비용은 설정 단가(입력 ${PRICE_INPUT_PER_1M}/1M · "
+                      f"출력 ${PRICE_OUTPUT_PER_1M}/1M) 기준",
     }
 
 
 # ───────────────────────── 파이프라인 실행 (백그라운드 스레드) ─────────────────────────
-def run_pipeline(job_id: str, path: str, engine: str) -> None:
+def run_pipeline(job_id: str, path: str) -> None:
     started = time.time()
     try:
         update_job(job_id, status="running")
         usage = Usage()
-        log.info("[JOB] %s 시작 · 캡션·요약 엔진=%s", job_id, LOCAL_VLM_ID if engine == "local" else OPENAI_MODEL)
+        log.info("[JOB] %s 시작 · 모델=%s", job_id, OPENAI_MODEL)
 
         frames, stats = stage1_opencv(path, job_id)
         keyframes = stage2_dino(frames, job_id)
         if not keyframes:
             raise RuntimeError("키프레임을 찾지 못했습니다.")
-        captions, image_tokens = stage3_captions(keyframes, job_id, usage, engine)
-        summary, summary_out = stage4_summary(captions, job_id, usage, engine)
+        captions = stage3_captions(keyframes, job_id, usage)
+        summary, summary_out = stage4_summary(captions, job_id, usage)
 
         stats["keyframes"] = len(keyframes)
         update_job(job_id, status="done", percent=100, result={
             "summary": summary,
             "keyframes": captions,
             "funnel": stats,
-            "metrics": build_metrics(stats, usage, summary_out, image_tokens, engine),
+            "metrics": build_metrics(stats, usage, summary_out),
             "elapsed_sec": round(time.time() - started, 1),
         })
-        log.info("[DONE] %s · %s · %.1fs · 입력 %d · 출력 %d (추론 %d)", job_id, engine, time.time() - started,
+        log.info("[DONE] %s · %.1fs · 입력 %d · 출력 %d (추론 %d)", job_id, time.time() - started,
                  usage.input_tokens, usage.output_tokens, usage.reasoning_tokens)
     except Exception as e:  # 오류는 프론트에 그대로 전달
         log.exception("[ERROR] %s", job_id)
@@ -582,21 +456,15 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @app.get("/")
 @app.get("/api/health")
 def health():
-    engines = available_engines()
-    return jsonify(status="ok", default_engine=CAPTION_BACKEND, engines=engines,
-                   engine_models={"local": LOCAL_VLM_ID, "openai": OPENAI_MODEL},
-                   dino=DINO_MODEL_ID, device=DEVICE,
-                   models_ready=_dino is not None and (_vlm is not None or "local" not in engines),
+    return jsonify(status="ok", model=OPENAI_MODEL, openai_key=bool(os.getenv("OPENAI_API_KEY")),
+                   dino=DINO_MODEL_ID, device=DEVICE, models_ready=_dino is not None,
                    warmup_error=WARMUP_ERROR, busy=WORKER_SLOT._value == 0)  # noqa: SLF001
 
 
 @app.post("/api/upload")
 def upload():
-    engines = available_engines()
-    engine = (request.form.get("engine") or CAPTION_BACKEND).strip().lower()
-    if engine not in engines:
-        hint = " (Colab Secrets에 OPENAI_API_KEY를 넣고 다시 실행)" if engine == "openai" else ""
-        return jsonify(error=f"'{engine}' 엔진을 사용할 수 없습니다. 사용 가능: {', '.join(engines) or '없음'}{hint}"), 400
+    if not os.getenv("OPENAI_API_KEY"):
+        return jsonify(error="서버에 OPENAI_API_KEY가 설정되지 않았습니다 (Colab Secrets 확인)."), 500
     f = request.files.get("video")
     if f is None or not f.filename:
         return jsonify(error="MP4 파일을 선택해 주세요."), 400
@@ -616,7 +484,7 @@ def upload():
     with JOBS_LOCK:
         JOBS[job_id] = {"status": "queued", "stage": 1, "stage_label": STAGES[1], "percent": 0,
                         "message": "대기 중", "result": None, "error": None, "updated_at": time.time()}
-    threading.Thread(target=run_pipeline, args=(job_id, path, engine), daemon=True).start()
+    threading.Thread(target=run_pipeline, args=(job_id, path), daemon=True).start()
     return jsonify(job_id=job_id)
 
 
@@ -678,22 +546,19 @@ WARMUP_ERROR: str | None = None
 
 
 def warmup() -> None:
-    """서버 시작 직후 모델을 미리 로드 → 첫 업로드 사용자가 다운로드를 기다리지 않게."""
+    """서버 시작 직후 DINOv2를 미리 로드 → 첫 업로드 사용자가 기다리지 않게."""
     global WARMUP_ERROR
     try:
         get_dino()
-        if CAPTION_BACKEND != "openai":
-            get_vlm()
     except Exception as e:  # 실패해도 서버는 유지, 업로드 시 다시 시도하고 오류는 /api/health에 표시
         WARMUP_ERROR = str(e)
         log.exception("[WARMUP] 모델 미리 로드 실패")
 
 
 if __name__ == "__main__":
-    if CAPTION_BACKEND not in ("local", "openai"):
-        raise SystemExit(f"CAPTION_BACKEND는 local 또는 openai여야 합니다 (현재: {CAPTION_BACKEND})")
-    log.info("device=%s · 기본 엔진=%s · 사용 가능=%s (openai 모델=%s) · origins=%s · port=%d",
-             DEVICE, CAPTION_BACKEND, available_engines(), OPENAI_MODEL, ALLOWED_ORIGINS, PORT)
+    if not os.getenv("OPENAI_API_KEY"):
+        log.warning("OPENAI_API_KEY가 없습니다. 업로드는 오류로 응답합니다 (Colab Secrets 확인).")
+    log.info("device=%s · model=%s · origins=%s · port=%d", DEVICE, OPENAI_MODEL, ALLOWED_ORIGINS, PORT)
     threading.Thread(target=warmup, daemon=True).start()
     start_ngrok(PORT)
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True, use_reloader=False)

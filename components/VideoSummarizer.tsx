@@ -1,12 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { getHealth, getJob, uploadVideo, type Engine, type Health, type Job, type JobResult } from '@/lib/api';
-
-const ENGINE_LABEL: Record<Engine, { name: string; note: string }> = {
-  local: { name: 'Qwen 로컬', note: 'Colab GPU · 비용 $0' },
-  openai: { name: 'GPT API', note: 'OpenAI · 사용량만큼 과금' },
-};
+import { getHealth, getJob, uploadVideo, type Health, type Job, type JobResult } from '@/lib/api';
 
 const STEPS = ['OpenCV 필터링', 'DINO 분석', '캡션 생성', '최종 요약'] as const;
 const nf = new Intl.NumberFormat('ko-KR');
@@ -23,19 +18,14 @@ export default function VideoSummarizer() {
   const [error, setError] = useState('');
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState('');
-  const [engine, setEngine] = useState<Engine | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
   useEffect(() => {
-    getHealth()
-      .then((h) => {
-        if (!Array.isArray(h.engines)) return;   // 이전 버전 백엔드: 엔진 선택 없이 서버 기본값 사용
-        setHealth(h);
-        setEngine(h.engines.includes(h.default_engine) ? h.default_engine : h.engines[0] ?? null);
-      })
+    getHealth()   // 연결 상태 안내용. 실패해도 업로드는 시도할 수 있음
+      .then(setHealth)
       .catch((err: Error) => setHealthError(err.message));
   }, []);
 
@@ -60,7 +50,7 @@ export default function VideoSummarizer() {
     setJob(null);
     setPhase('uploading');
     try {
-      const jobId = await uploadVideo(file, engine ?? undefined);
+      const jobId = await uploadVideo(file);
       setPhase('processing');
       timer.current = setInterval(async () => {
         try {
@@ -112,24 +102,12 @@ export default function VideoSummarizer() {
             <small>최대 10분 · 200MB · 처리 후 서버에서 삭제됩니다</small>
             {file && <em>{file.name} ({(file.size / 1024 / 1024).toFixed(1)}MB)</em>}
           </label>
-          <fieldset className="engines" disabled={busy}>
-            <legend>캡션·요약 엔진</legend>
-            {(['local', 'openai'] as Engine[]).map((e) => {
-              const available = health?.engines.includes(e) ?? false;
-              return (
-                <label key={e} className={'engine' + (engine === e ? ' on' : '') + (available ? '' : ' off')}>
-                  <input type="radio" name="engine" value={e} checked={engine === e} disabled={!available}
-                    onChange={() => setEngine(e)} />
-                  <b>{ENGINE_LABEL[e].name}</b>
-                  <small>{health ? health.engine_models[e] : '…'} · {available ? ENGINE_LABEL[e].note : '서버에서 사용 불가'}</small>
-                </label>
-              );
-            })}
-          </fieldset>
+          {health?.model && <p className="hint">캡션·요약 모델: <b>{health.model}</b></p>}
           {healthError && <p className="hint">⚠ 백엔드 상태를 확인하지 못했어요: {healthError}</p>}
-          {health && !health.models_ready && <p className="hint">⏳ 서버가 모델을 불러오는 중이에요. 잠시 후 시작하세요.</p>}
+          {health && health.openai_key === false && <p className="hint">⚠ 서버에 OpenAI 키가 설정되지 않았어요 (Colab Secrets 확인).</p>}
+          {health && health.models_ready === false && <p className="hint">⏳ 서버가 DINOv2 모델을 불러오는 중이에요. 잠시 후 시작하세요.</p>}
           <div className="actions">
-            <button type="submit" className="btn" disabled={!file || busy || (!!health && !engine)}>{busy ? '처리 중…' : '요약 시작 ▶'}</button>
+            <button type="submit" className="btn" disabled={!file || busy}>{busy ? '처리 중…' : '요약 시작 ▶'}</button>
           </div>
           {error && <p className="alert" role="alert">⚠ {error}</p>}
         </form>
@@ -183,8 +161,8 @@ function Results({ r }: { r: JobResult }) {
             <div className="kpi"><small>전체 영상 입력 시 (예상)</small><b>{nf.format(m.baseline_tokens)}</b>
               <span>{nf.format(m.baseline_frames)}프레임 × {nf.format(m.baseline_tokens_per_frame)}토큰</span></div>
             <div className="kpi"><small>절약한 토큰</small><b>{nf.format(m.saved_tokens)}</b><span>예상 − 실제</span></div>
-            <div className="kpi"><small>예상 절감 비용 (API 단가 환산)</small><b>{usd(m.saved_cost_usd)}</b>
-              <span>실제 청구 {usd(m.billed_cost_usd)}{m.backend === 'local' ? ' · 로컬 모델' : ''} / 통째로 {usd(m.baseline_cost_usd)}</span></div>
+            <div className="kpi"><small>예상 절감 비용</small><b>{usd(m.saved_cost_usd)}</b>
+              <span>실제 {usd(m.actual_cost_usd)} / 통째로 {usd(m.baseline_cost_usd)}</span></div>
           </div>
           <div className="meter" title={`실제 ${nf.format(m.actual_tokens)} / 예상 ${nf.format(m.baseline_tokens)} 토큰`}>
             <div className="meter-legend"><span>실제 사용량 (예상 대비)</span><span>{ratio.toFixed(1)}%</span></div>
@@ -194,7 +172,7 @@ function Results({ r }: { r: JobResult }) {
             1fps 샘플 <b>{nf.format(f.sampled)}장</b> <span>→</span> OpenCV 통과 <b>{nf.format(f.stage1_kept)}장</b>{' '}
             <span>→</span> DINO 키프레임 <b>{nf.format(f.keyframes)}장</b>
           </p>
-          <p className="note">※ 캡션·요약 엔진: {m.engine} · {m.assumption} · 처리 시간 {r.elapsed_sec}초</p>
+          <p className="note">※ 캡션·요약 모델: {m.engine} · {m.assumption} · 처리 시간 {r.elapsed_sec}초</p>
         </div>
       </section>
 
