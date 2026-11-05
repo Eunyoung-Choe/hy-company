@@ -109,3 +109,11 @@
 .pii .record .btn-rec-save { background: #fff; color: var(--text, #111827); border: 1px solid var(--line); font-weight: 500; word-break: break-all; }
 .pii .rec-note { font-size: 12px; color: var(--ok); }
 .pii .record .toggle-error { margin: 0; }
+
+/* 마스킹 꺼짐 경고 */
+.pii .badge.danger { background: #dc2626; }
+
+/* 데모 창 열기 */
+.pii .demo-open { display: grid; gap: 6px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.pii .demo-open button { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+.pii .demo-open .toggle-error { margin: 0; }

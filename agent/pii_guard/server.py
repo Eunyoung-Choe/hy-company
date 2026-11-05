@@ -4,6 +4,7 @@ GET /stream.mjpg  마스킹 완성본 실시간 스트림
 GET /snapshot.jpg 마스킹 완성본 한 장
 GET /status       처리 상태(JSON, 개인정보 텍스트 없음)
 POST /control?sharing=on|off  원격 켜기/끄기 (허용된 Origin만)
+POST /control?masking=on|off  마스킹 켜기/끄기 (허용된 Origin만, 끄면 원본 송출 — 비교 시연용)
 POST /record?action=start|stop 녹화 시작/종료 (허용된 Origin만, 마스킹 완성본만 녹화)
 GET /recordings/<파일>.mp4    녹화 파일 다운로드
 """
@@ -22,7 +23,7 @@ BOUNDARY = b"frame"
 
 def make_server(host: str, port: int, out: LatestJpeg, status: Callable[[], dict],
                 set_sharing: Callable[[bool], None], allowed_origins: list[str],
-                recorder: Recorder) -> ThreadingHTTPServer:
+                recorder: Recorder, set_masking: Callable[[bool], None]) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):  # 접근 로그 생략
             pass
@@ -57,11 +58,14 @@ def make_server(host: str, port: int, out: LatestJpeg, status: Callable[[], dict
                 return
             params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
             if path == "/control":
-                value = params.get("sharing")
-                if value not in ("on", "off"):
-                    self.send_error(400, "sharing=on|off")
+                sharing, masking = params.get("sharing"), params.get("masking")
+                if sharing not in ("on", "off", None) or masking not in ("on", "off", None) or sharing == masking is None:
+                    self.send_error(400, "sharing=on|off or masking=on|off")
                     return
-                set_sharing(value == "on")
+                if sharing:
+                    set_sharing(sharing == "on")
+                if masking:
+                    set_masking(masking == "on")
             else:
                 action = params.get("action")
                 if action not in ("start", "stop"):

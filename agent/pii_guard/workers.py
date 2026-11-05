@@ -74,6 +74,9 @@ class Stats:
         # 원격 on/off. 꺼지면 캡처·송출을 멈춘다 (OCR은 새 프레임이 없으니 자연히 쉼)
         self.sharing = threading.Event()
         self.sharing.set()
+        # 마스킹 on/off (비교 시연용). 꺼지면 원본을 그대로 송출한다. 시작할 때는 항상 켜짐
+        self.masking = threading.Event()
+        self.masking.set()
 
 
 # ---------- 1단계: 캡처 (CPU, mss) ----------
@@ -480,7 +483,10 @@ def output_loop(cfg: Config, ring: RingBuffer, state: VerifiedState, out: Latest
         t0 = time.perf_counter()
         seq = new_seq
         seen_version = state.version
-        masked, pending = mask_frame(frame, state.get())
+        if stats.masking.is_set():
+            masked, pending = mask_frame(frame, state.get())
+        else:  # 마스킹 꺼짐 → 원본 그대로 (OCR은 계속 돌아 다시 켜면 바로 마스킹)
+            masked, pending = frame, 0
         stats.pending_regions = pending
         ok, jpg = cv2.imencode(".jpg", masked, params)
         if recorder is not None:

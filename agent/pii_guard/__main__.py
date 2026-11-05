@@ -40,10 +40,19 @@ def main() -> None:
             stats.sharing.clear()
         log.info("원격 %s", "켜짐" if on else "꺼짐")
 
+    def set_masking(on: bool) -> None:
+        if on:
+            stats.masking.set()
+            log.info("마스킹 켜짐")
+        else:
+            stats.masking.clear()
+            log.warning("마스킹 꺼짐: 원본 화면을 그대로 송출합니다")
+
     def status() -> dict:
         v = state.get()
         return {
             "sharing": stats.sharing.is_set(),
+            "masking": stats.masking.is_set(),
             "capture_fps": stats.capture.value(),
             "capture_backend": stats.capture_backend,
             "output_fps": stats.output.value(),
@@ -79,7 +88,8 @@ def main() -> None:
     for t in threads:
         t.start()
 
-    srv = make_server(cfg.stream_host, cfg.stream_port, out, status, set_sharing, cfg.allowed_origins, recorder)
+    srv = make_server(cfg.stream_host, cfg.stream_port, out, status, set_sharing, cfg.allowed_origins, recorder,
+                      set_masking)
     threading.Thread(target=srv.serve_forever, name="http", daemon=True).start()
     log.info("캡처 영역 %s", rect)
     log.info("송출: http://%s:%d/stream.mjpg  상태: /status", cfg.stream_host, cfg.stream_port)
