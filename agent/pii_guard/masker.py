@@ -66,6 +66,14 @@ SCROLL_MAX_ERR = 0.05    # 정규화 제곱오차 허용치 (이보다 크면 �
 SCROLL_CANDIDATES = 4  # 1/4 해상도에서 고르는 후보 위치 수
 
 
+SCROLL_MIN_ROWS = 0.25   # 바뀐 줄 비율이 이보다 작으면 스크롤 검사 생략
+
+
+def changed_rows_ratio(cur: np.ndarray, ref: np.ndarray) -> float:
+    """비교 이미지에서 픽셀이 바뀐 줄의 비율 (0~1)."""
+    return float(np.count_nonzero((cv2.absdiff(cur, ref) > DIFF_THRESHOLD).any(axis=1))) / max(1, cur.shape[0])
+
+
 _ref_cache: list = [None, None, None]  # [기준, 1/2, 1/4 크기] — 같은 검증본이면 다시 줄이지 않는다
 
 
@@ -226,7 +234,8 @@ def mask_frame(frame: np.ndarray, v: Verified) -> tuple[np.ndarray, int]:
     ref, hits = v.ref_key, v.hits
     held = v.masked_frame if v.masked_frame is not None and v.masked_frame.shape == frame.shape else None
     band = None  # 스크롤로 새로 드러난 띠 (frame 좌표)
-    dy = estimate_scroll(gray, v.ref_key)
+    # 스크롤이면 글자가 있는 줄 대부분이 바뀐다. 바뀐 줄이 적으면(타이핑, 일부 갱신) 스크롤 계산(3~7ms)을 건너뛴다
+    dy = estimate_scroll(gray, v.ref_key) if changed_rows_ratio(gray, v.ref_key) >= SCROLL_MIN_ROWS else 0
     if dy:
         # 검증된 기준·박스·검증본을 스크롤만큼 같이 민다 → 화면이 멈추지 않고 따라 움직인다
         ref = shift_rows(v.ref_key, dy, gray)  # 드러난 줄은 band로 따로 가리므로 비교에서 제외
