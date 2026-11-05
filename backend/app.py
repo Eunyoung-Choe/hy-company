@@ -6,9 +6,9 @@
   3단계  캡션     : 키프레임만 저해상도로 VLM에 넣어 1줄 캡션
   4단계  요약     : 시간순 캡션 텍스트만으로 최종 요약 (이미지 재전송 없음)
 
-  3·4단계 엔진(CAPTION_BACKEND)
+  3·4단계 엔진 (업로드마다 form 필드 "engine"으로 선택, 기본값은 CAPTION_BACKEND)
     local  (기본) Qwen2.5-VL-3B-Instruct를 Colab GPU에서 직접 실행 → API 키·비용 없음
-    openai        gpt-5-mini API (OPENAI_API_KEY 필요)
+    openai        OpenAI API (OPENAI_MODEL, 기본 gpt-5.4-mini · OPENAI_API_KEY가 있을 때만 사용 가능)
 
 API
   GET  /                 상태 확인
@@ -18,7 +18,7 @@ API
 비밀값은 환경변수로만 받습니다 (Colab Secrets 또는 로컬 .env). 코드에 키를 적지 마세요.
   NGROK_AUTHTOKEN  있으면 ngrok 터널을 열어 외부 URL 발급
   NGROK_DOMAIN     선택 · ngrok 무료 고정 도메인(xxx.ngrok-free.dev) → 매번 같은 URL
-  OPENAI_API_KEY   CAPTION_BACKEND=openai일 때만 필요
+  OPENAI_API_KEY   선택 · 있으면 화면에서 GPT 엔진을 고를 수 있음
 """
 from __future__ import annotations
 
@@ -71,7 +71,8 @@ VLM_MIN_PIXELS = env_int("VLM_MIN_PIXELS", 224 * 224)
 VLM_DTYPE = os.getenv("VLM_DTYPE", "auto").strip().lower()     # auto | float16 | bfloat16 | float32
 # openai
 CAPTION_WORKERS = env_int("CAPTION_WORKERS", 4)
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "none").strip().lower()  # 안 받으면 자동 재시도
 # 비용 환산용 단가(USD / 1M 토큰). local이면 실제 청구는 0원이고, 'API로 처리했다면' 환산에만 씀
 PRICE_INPUT_PER_1M = env_float("PRICE_INPUT_PER_1M", 0.25)
 PRICE_OUTPUT_PER_1M = env_float("PRICE_OUTPUT_PER_1M", 2.00)
@@ -108,10 +109,14 @@ class Usage:
     output_tokens: int = 0
     calls: int = 0
 
+    reasoning_tokens: int = 0   # 출력 토큰 중 보이지 않는 추론 토큰 (OpenAI 추론 모델)
+
     def add(self, u) -> None:   # OpenAI 응답의 usage
         if u is None:
             return
         self.add_counts(u.prompt_tokens or 0, u.completion_tokens or 0)
+        details = getattr(u, "completion_tokens_details", None)
+        self.reasoning_tokens += (getattr(details, "reasoning_tokens", 0) or 0) if details else 0
 
     def add_counts(self, n_in: int, n_out: int) -> None:
         self.input_tokens += n_in
@@ -376,19 +381,44 @@ def openai_client():
     return OpenAI()   # OPENAI_API_KEY 환경변수 사용
 
 
-def model_options() -> dict:
-    """추론 모델(gpt-5*, o*)에만 reasoning_effort를 보냄. 일반 모델(gpt-4.1-mini 등)은 이 옵션을 받지 않음."""
-    name = OPENAI_MODEL.lower()
-    if name.startswith("gpt-5") or (name.startswith("o") and name[1:2].isdigit()):
-        return {"reasoning_effort": "minimal"}   # 추론 토큰 최소화
-    return {}
+_effort_ok: dict[str, str | None] = {}   # 모델별로 통과한 reasoning_effort 값 (None = 보내지 않음)
+
+
+def effort_candidates(name: str) -> list[str | None]:
+    """추론 모델(gpt-5*, o*)은 추론 토큰을 줄이는 값부터 시도. 모델마다 허용 값이 달라 순서대로 재시도."""
+    n = name.lower()
+    if not (n.startswith("gpt-5") or (n.startswith("o") and n[1:2].isdigit())):
+        return [None]   # 일반 모델(gpt-4.1-mini 등)은 이 옵션을 받지 않음
+    out: list[str | None] = []
+    for v in (OPENAI_REASONING_EFFORT, "none", "minimal", "low", None):
+        if v not in out:
+            out.append(v)
+    return out
+
+
+def openai_chat(client, **kwargs):
+    from openai import BadRequestError
+
+    candidates = [_effort_ok[OPENAI_MODEL]] if OPENAI_MODEL in _effort_ok else effort_candidates(OPENAI_MODEL)
+    last: Exception | None = None
+    for effort in candidates:
+        try:
+            r = client.chat.completions.create(
+                model=OPENAI_MODEL, **({"reasoning_effort": effort} if effort else {}), **kwargs)
+            _effort_ok[OPENAI_MODEL] = effort
+            return r
+        except BadRequestError as e:
+            if "reasoning" not in str(e).lower():
+                raise   # 권한·형식 오류 등은 숨기지 않음
+            last = e
+            log.info("[OpenAI] %s는 reasoning_effort=%s를 받지 않음 → 다음 값으로 재시도", OPENAI_MODEL, effort)
+    raise last  # type: ignore[misc]
 
 
 def openai_caption_one(client, b64: str):
-    r = client.chat.completions.create(
-        model=OPENAI_MODEL,
-        **model_options(),
-        max_completion_tokens=300,
+    r = openai_chat(
+        client,
+        max_completion_tokens=800,   # 추론 토큰 포함 상한. 실제로 쓴 만큼만 과금
         messages=[{"role": "user", "content": [
             {"type": "text", "text": CAPTION_PROMPT},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"}},
@@ -414,10 +444,9 @@ def openai_captions(keyframes: list[Frame], job_id: str, usage: Usage) -> list[d
 
 
 def openai_summary(prompt: str, usage: Usage) -> tuple[str, int]:
-    r = openai_client().chat.completions.create(
-        model=OPENAI_MODEL,
-        **model_options(),
-        max_completion_tokens=1500,
+    r = openai_chat(
+        openai_client(),
+        max_completion_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
     usage.add(r.usage)
@@ -430,20 +459,27 @@ def keyframe_entry(f: Frame, caption: str, failed: bool = False) -> dict:
             "image": jpeg_b64(f.image, CAPTION_MAX_SIDE), "caption": caption or "(캡션이 비어 있음)"}
 
 
-def stage3_captions(keyframes: list[Frame], job_id: str, usage: Usage) -> tuple[list[dict], list[int]]:
-    if CAPTION_BACKEND == "openai":
+def available_engines() -> list[str]:
+    engines = ["local"] if CAPTION_BACKEND == "local" else []   # openai 전용으로 켜면 Qwen을 로드하지 않음
+    if os.getenv("OPENAI_API_KEY"):
+        engines.append("openai")
+    return engines
+
+
+def stage3_captions(keyframes: list[Frame], job_id: str, usage: Usage, engine: str) -> tuple[list[dict], list[int]]:
+    if engine == "openai":
         return openai_captions(keyframes, job_id, usage), []
     return local_captions(keyframes, job_id, usage)
 
 
-def stage4_summary(captions: list[dict], job_id: str, usage: Usage) -> tuple[str, int]:
+def stage4_summary(captions: list[dict], job_id: str, usage: Usage, engine: str) -> tuple[str, int]:
     set_progress(job_id, 4, 0.1, "캡션 텍스트로 요약 중 (이미지 미전송)")
     usable = [c for c in captions if not c["failed"]]   # 실패한 캡션은 요약 입력에서 제외
     if not usable:
         raise RuntimeError("모든 장면의 캡션 생성에 실패했습니다. Colab 로그의 [CAPTION] 줄을 확인해 주세요.")
     timeline = "\n".join(f"[{c['time_label']}] {c['caption']}" for c in usable)   # 텍스트만!
     prompt = f"{SUMMARY_PROMPT}\n\n{timeline}"
-    summary, out_tokens = (openai_summary if CAPTION_BACKEND == "openai" else local_summary)(prompt, usage)
+    summary, out_tokens = (openai_summary if engine == "openai" else local_summary)(prompt, usage)
     set_progress(job_id, 4, 1.0, "완료")
     return summary, out_tokens
 
@@ -462,10 +498,10 @@ def cost(inp: int, out: int) -> float:
     return inp / 1e6 * PRICE_INPUT_PER_1M + out / 1e6 * PRICE_OUTPUT_PER_1M
 
 
-def build_metrics(stats: dict, usage: Usage, summary_out_tokens: int, image_tokens: list[int]) -> dict:
+def build_metrics(stats: dict, usage: Usage, summary_out_tokens: int, image_tokens: list[int], engine: str) -> dict:
     """'영상 통째로' 기준선은 같은 엔진의 토큰 계산 방식으로 잡아 사과-사과 비교."""
     baseline_frames = max(1, math.ceil(stats["duration"] * BASELINE_FPS))
-    local = CAPTION_BACKEND != "openai"
+    local = engine != "openai"
     if local and image_tokens:
         per_frame = round(sum(image_tokens) / len(image_tokens))   # Qwen에 실제 들어간 프레임당 이미지 토큰
         basis = f"모든 {BASELINE_FPS:g}fps 프레임을 같은 해상도로 Qwen2.5-VL에 넣었다고 가정"
@@ -480,7 +516,8 @@ def build_metrics(stats: dict, usage: Usage, summary_out_tokens: int, image_toke
     return {
         "backend": "local" if local else "openai",
         "engine": LOCAL_VLM_ID if local else OPENAI_MODEL,
-        "billed_cost_usd": 0.0 if local else actual_cost,   # 실제 청구액 (로컬 모델은 0)
+        "billed_cost_usd": 0.0 if local else actual_cost,   # 실제 청구액 (로컬 모델은 0, API는 설정 단가 기준)
+        "reasoning_tokens": usage.reasoning_tokens,
         "actual_tokens": actual,
         "actual_input_tokens": usage.input_tokens,
         "actual_output_tokens": usage.output_tokens,
@@ -499,29 +536,30 @@ def build_metrics(stats: dict, usage: Usage, summary_out_tokens: int, image_toke
 
 
 # ───────────────────────── 파이프라인 실행 (백그라운드 스레드) ─────────────────────────
-def run_pipeline(job_id: str, path: str) -> None:
+def run_pipeline(job_id: str, path: str, engine: str) -> None:
     started = time.time()
     try:
         update_job(job_id, status="running")
         usage = Usage()
+        log.info("[JOB] %s 시작 · 캡션·요약 엔진=%s", job_id, LOCAL_VLM_ID if engine == "local" else OPENAI_MODEL)
 
         frames, stats = stage1_opencv(path, job_id)
         keyframes = stage2_dino(frames, job_id)
         if not keyframes:
             raise RuntimeError("키프레임을 찾지 못했습니다.")
-        captions, image_tokens = stage3_captions(keyframes, job_id, usage)
-        summary, summary_out = stage4_summary(captions, job_id, usage)
+        captions, image_tokens = stage3_captions(keyframes, job_id, usage, engine)
+        summary, summary_out = stage4_summary(captions, job_id, usage, engine)
 
         stats["keyframes"] = len(keyframes)
         update_job(job_id, status="done", percent=100, result={
             "summary": summary,
             "keyframes": captions,
             "funnel": stats,
-            "metrics": build_metrics(stats, usage, summary_out, image_tokens),
+            "metrics": build_metrics(stats, usage, summary_out, image_tokens, engine),
             "elapsed_sec": round(time.time() - started, 1),
         })
-        log.info("[DONE] %s · %.1fs · 토큰 %d", job_id, time.time() - started,
-                 usage.input_tokens + usage.output_tokens)
+        log.info("[DONE] %s · %s · %.1fs · 입력 %d · 출력 %d (추론 %d)", job_id, engine, time.time() - started,
+                 usage.input_tokens, usage.output_tokens, usage.reasoning_tokens)
     except Exception as e:  # 오류는 프론트에 그대로 전달
         log.exception("[ERROR] %s", job_id)
         update_job(job_id, status="error", error=str(e))
@@ -544,16 +582,21 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @app.get("/")
 @app.get("/api/health")
 def health():
-    local = CAPTION_BACKEND != "openai"
-    return jsonify(status="ok", backend=CAPTION_BACKEND, model=LOCAL_VLM_ID if local else OPENAI_MODEL,
-                   dino=DINO_MODEL_ID, device=DEVICE, models_ready=_dino is not None and (_vlm is not None or not local),
+    engines = available_engines()
+    return jsonify(status="ok", default_engine=CAPTION_BACKEND, engines=engines,
+                   engine_models={"local": LOCAL_VLM_ID, "openai": OPENAI_MODEL},
+                   dino=DINO_MODEL_ID, device=DEVICE,
+                   models_ready=_dino is not None and (_vlm is not None or "local" not in engines),
                    warmup_error=WARMUP_ERROR, busy=WORKER_SLOT._value == 0)  # noqa: SLF001
 
 
 @app.post("/api/upload")
 def upload():
-    if CAPTION_BACKEND == "openai" and not os.getenv("OPENAI_API_KEY"):
-        return jsonify(error="CAPTION_BACKEND=openai인데 OPENAI_API_KEY가 없습니다 (Colab Secrets 확인)."), 500
+    engines = available_engines()
+    engine = (request.form.get("engine") or CAPTION_BACKEND).strip().lower()
+    if engine not in engines:
+        hint = " (Colab Secrets에 OPENAI_API_KEY를 넣고 다시 실행)" if engine == "openai" else ""
+        return jsonify(error=f"'{engine}' 엔진을 사용할 수 없습니다. 사용 가능: {', '.join(engines) or '없음'}{hint}"), 400
     f = request.files.get("video")
     if f is None or not f.filename:
         return jsonify(error="MP4 파일을 선택해 주세요."), 400
@@ -573,7 +616,7 @@ def upload():
     with JOBS_LOCK:
         JOBS[job_id] = {"status": "queued", "stage": 1, "stage_label": STAGES[1], "percent": 0,
                         "message": "대기 중", "result": None, "error": None, "updated_at": time.time()}
-    threading.Thread(target=run_pipeline, args=(job_id, path), daemon=True).start()
+    threading.Thread(target=run_pipeline, args=(job_id, path, engine), daemon=True).start()
     return jsonify(job_id=job_id)
 
 
@@ -649,8 +692,8 @@ def warmup() -> None:
 if __name__ == "__main__":
     if CAPTION_BACKEND not in ("local", "openai"):
         raise SystemExit(f"CAPTION_BACKEND는 local 또는 openai여야 합니다 (현재: {CAPTION_BACKEND})")
-    engine = LOCAL_VLM_ID if CAPTION_BACKEND == "local" else OPENAI_MODEL
-    log.info("device=%s · backend=%s(%s) · origins=%s · port=%d", DEVICE, CAPTION_BACKEND, engine, ALLOWED_ORIGINS, PORT)
+    log.info("device=%s · 기본 엔진=%s · 사용 가능=%s (openai 모델=%s) · origins=%s · port=%d",
+             DEVICE, CAPTION_BACKEND, available_engines(), OPENAI_MODEL, ALLOWED_ORIGINS, PORT)
     threading.Thread(target=warmup, daemon=True).start()
     start_ngrok(PORT)
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True, use_reloader=False)

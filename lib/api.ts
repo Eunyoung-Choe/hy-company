@@ -12,6 +12,7 @@ export type Metrics = {
   backend: 'local' | 'openai';
   engine: string;
   billed_cost_usd: number;
+  reasoning_tokens: number;
   actual_tokens: number;
   actual_input_tokens: number;
   actual_output_tokens: number;
@@ -63,9 +64,26 @@ async function readJson<T>(res: Response): Promise<T> {
   return data as T;
 }
 
-export async function uploadVideo(file: File): Promise<string> {
+export type Engine = 'local' | 'openai';
+
+export type Health = {
+  status: string;
+  default_engine: Engine;
+  engines: Engine[];
+  engine_models: Record<Engine, string>;
+  models_ready: boolean;
+  busy: boolean;
+};
+
+export async function getHealth(): Promise<Health> {
+  const res = await fetch(`${requireApiUrl()}/api/health`, { cache: 'no-store', headers: HEADERS });
+  return readJson<Health>(res);
+}
+
+export async function uploadVideo(file: File, engine?: Engine): Promise<string> {
   const body = new FormData();
   body.append('video', file);
+  if (engine) body.append('engine', engine);
   let res: Response;
   try {
     res = await fetch(`${requireApiUrl()}/api/upload`, { method: 'POST', body, headers: HEADERS });

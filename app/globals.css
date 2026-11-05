@@ -61,6 +61,17 @@ h1, h2, p { margin: 0; }
 .drop em { color: var(--green-dark); font-style: normal; font-weight: bold; margin-top: 6px; }
 .actions { margin-top: 14px; }
 
+/* 엔진 선택 */
+.engines { margin: 14px 0 0; padding: 10px 12px 12px; border: 1px solid var(--edge-lo); display: flex; gap: 10px; flex-wrap: wrap; }
+.engines legend { padding: 0 6px; font-weight: bold; color: var(--ink-2); }
+.engine { flex: 1 1 220px; display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center;
+          padding: 8px 10px; border: 2px solid var(--edge-lo); cursor: pointer; background: #fbfdfb; }
+.engine input { grid-row: span 2; accent-color: var(--green); }
+.engine small { color: var(--muted); }
+.engine.on { border-color: var(--green); background: var(--green-light); }
+.engine.off { opacity: 0.55; cursor: not-allowed; }
+.hint { margin-top: 10px; color: var(--ink-2); font-size: 13px; }
+
 .btn {
   font: inherit; font-weight: bold; color: var(--ink); cursor: pointer;
   padding: 8px 22px; background: #f3f6f3;
