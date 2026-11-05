@@ -1,2 +1,141 @@
-body { margin: 0; font-family: system-ui, sans-serif; }
-main { min-height: 100vh; display: grid; place-items: center; }
+/* 흰 배경 + 초록 포인트 · Tahoma 레트로(클래식 데스크톱 창) 스타일 */
+:root {
+  --bg: #ffffff;
+  --ink: #1d2a20;
+  --ink-2: #4b5b4f;
+  --muted: #7d8a80;
+  --green: #1f8a3b;
+  --green-dark: #146b2b;
+  --green-light: #e6f4ea;
+  --track: #d9ecdf;
+  --edge-hi: #ffffff;
+  --edge-lo: #8fa595;
+  --edge-dark: #2c3a30;
+  --danger: #a4161a;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Tahoma, Verdana, 'Segoe UI', 'Malgun Gothic', sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+}
+h1, h2, p { margin: 0; }
+
+.desk { max-width: 1000px; margin: 0 auto; padding: 32px 16px 72px; }
+
+.masthead { margin-bottom: 20px; }
+.masthead h1 { font-size: 30px; letter-spacing: -0.5px; }
+.masthead h1 span { color: var(--green); }
+.masthead p { color: var(--ink-2); margin-top: 4px; }
+
+/* 창(window) 패널 */
+.win {
+  margin-top: 18px;
+  border: 2px solid var(--edge-dark);
+  box-shadow: 4px 4px 0 var(--green-light), 4px 4px 0 2px var(--edge-lo);
+  background: var(--bg);
+}
+.win-title {
+  background: linear-gradient(90deg, var(--green-dark), var(--green));
+  color: #fff;
+  font-weight: bold;
+  padding: 5px 10px;
+  letter-spacing: 0.3px;
+  border-bottom: 2px solid var(--edge-dark);
+}
+.win-body { padding: 18px; }
+
+/* 업로드 */
+.drop {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 30px 16px; text-align: center; cursor: pointer;
+  border: 2px dashed var(--edge-lo); background: #fbfdfb;
+}
+.drop:hover, .drop.over { border-color: var(--green); background: var(--green-light); }
+.drop small { color: var(--muted); }
+.drop em { color: var(--green-dark); font-style: normal; font-weight: bold; margin-top: 6px; }
+.actions { margin-top: 14px; }
+
+.btn {
+  font: inherit; font-weight: bold; color: var(--ink); cursor: pointer;
+  padding: 8px 22px; background: #f3f6f3;
+  border: 2px solid; border-color: var(--edge-hi) var(--edge-dark) var(--edge-dark) var(--edge-hi);
+  box-shadow: 1px 1px 0 var(--edge-dark);
+}
+.btn:not(:disabled):hover { background: var(--green-light); }
+.btn:not(:disabled):active { border-color: var(--edge-dark) var(--edge-hi) var(--edge-hi) var(--edge-dark); box-shadow: none; }
+.btn:disabled { color: var(--muted); cursor: not-allowed; }
+.btn:focus-visible, .drop:focus-within { outline: 2px dotted var(--green-dark); outline-offset: 3px; }
+
+.alert { margin-top: 14px; padding: 10px 12px; border: 2px solid var(--danger); color: var(--danger); background: #fff5f5; }
+
+/* 진행 상태 */
+.steps { list-style: none; padding: 0; margin: 0 0 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.step { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--edge-lo); color: var(--muted); }
+.step .mark {
+  width: 22px; height: 22px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--edge-lo); background: #f3f6f3; font-size: 12px; font-weight: bold;
+}
+.step.active { color: var(--ink); border-color: var(--green); background: var(--green-light); font-weight: bold; }
+.step.done { color: var(--ink-2); }
+.step.done .mark { background: var(--green); border-color: var(--green-dark); color: #fff; }
+.spinner {
+  width: 14px; height: 14px; display: block;
+  border: 3px dotted var(--green); border-radius: 50%;
+  animation: spin 1s steps(8) infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 클래식 블록형 프로그레스 바 */
+.progress {
+  height: 24px; padding: 3px; background: var(--bg);
+  border: 2px solid; border-color: var(--edge-lo) var(--edge-hi) var(--edge-hi) var(--edge-lo);
+  box-shadow: inset 1px 1px 0 var(--edge-dark);
+}
+.progress-fill {
+  height: 100%; width: 0; transition: width 0.4s steps(6);
+  background: repeating-linear-gradient(90deg, var(--green) 0 12px, transparent 12px 15px);
+}
+.progress-meta { display: flex; justify-content: space-between; margin-top: 8px; color: var(--ink-2); }
+
+/* 대시보드 */
+.hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.hero b { font-size: 52px; line-height: 1; letter-spacing: -1px; }
+.hero span { color: var(--ink-2); }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 18px; }
+.kpi { display: flex; flex-direction: column; gap: 2px; padding: 12px; border: 1px solid var(--edge-lo); background: #fbfdfb; }
+.kpi small { color: var(--ink-2); }
+.kpi b { font-size: 21px; font-variant-numeric: tabular-nums; }
+.kpi span { color: var(--muted); font-size: 12px; }
+.meter { margin-top: 18px; }
+.meter-legend { display: flex; justify-content: space-between; color: var(--ink-2); font-size: 13px; margin-bottom: 6px; }
+.meter-track { height: 14px; background: var(--track); border: 1px solid var(--edge-lo); }
+.meter-fill { height: 100%; min-width: 4px; background: var(--green); }
+.funnel { margin-top: 14px; color: var(--ink-2); }
+.funnel b { color: var(--ink); }
+.funnel span { color: var(--green); font-weight: bold; }
+.note { margin-top: 10px; color: var(--muted); font-size: 12px; }
+
+/* 요약 · 갤러리 */
+.summary { white-space: pre-wrap; font-size: 15px; border-left: 4px solid var(--green); padding-left: 14px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.shot { margin: 0; border: 1px solid var(--edge-lo); background: var(--bg); }
+.shot-img { position: relative; aspect-ratio: 16 / 9; background: #f3f6f3; border-bottom: 1px solid var(--edge-lo); }
+.shot-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.stamp {
+  position: absolute; left: 6px; top: 6px; padding: 1px 6px;
+  background: var(--bg); border: 1px solid var(--edge-dark);
+  font-size: 12px; font-weight: bold; color: var(--green-dark);
+}
+.shot figcaption { padding: 10px 12px; font-size: 13px; }
+.shot figcaption.failed { color: var(--muted); font-style: italic; }
+
+@media (max-width: 720px) {
+  .steps, .kpis { grid-template-columns: repeat(2, 1fr); }
+  .hero b { font-size: 42px; }
+}

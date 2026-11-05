@@ -7,3 +7,6 @@ supabase/.temp
 supabase/.branches
 node_modules
 .next
+
+# 파이썬 백엔드는 Hugging Face에 별도 배포
+backend
