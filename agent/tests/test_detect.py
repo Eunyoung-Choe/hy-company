@@ -44,6 +44,25 @@ class FindSpans(unittest.TestCase):
         _, s, e = find_spans("주소: 경기도 성남시 분당구 판교역로 235")[0]
         self.assertEqual(e, len("주소: 경기도 성남시 분당구 판교역로 235"))
 
+    def test_address_full(self):
+        def addr(text):
+            return [text[s:e] for k, s, e in find_spans(text) if k == "ADDRESS"]
+        whole = [  # 층·호수·동·건물명까지 통째로
+            "서울특별시 강남구 테헤란로 152, 12층 1203호",
+            "서울 송파구 올림픽로 300 롯데월드타워 101동 1203호",
+            "경기도 성남시 분당구 판교역로 166 (백현동) 5층",
+            "서울특별시 강남구 테헤란로7길 22 지하 1층 B101호",
+            "인천광역시 연수구 송도동 24-56",
+            "경기 화성시 봉담읍 와우리 산 12",
+            "강남구 역삼동 823-1 4층",
+            "서울특별시 성동구 왕십리로222 3층",
+        ]
+        for t in whole:
+            self.assertEqual(addr(t), [t], t)
+        self.assertEqual(addr("주소: 판교 사옥 정문 경비실"), ["판교 사옥 정문 경비실"])  # 라벨 뒤 전체
+        for t in ("서울 출장 가는 길에 들렀어요", "연구 활동 3건 진행", "다음 주 서울 방문 예정"):
+            self.assertEqual(addr(t), [], t)
+
     def test_ocr_fix(self):
         self.assertEqual(normalize("9OO1O1-1234567"), "900101-1234567")
         self.assertEqual(normalize("OTP"), "OTP")

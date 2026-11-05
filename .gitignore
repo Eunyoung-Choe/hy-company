@@ -16,3 +16,6 @@ supabase/.branches/
 # Python 에이전트
 agent/.venv/
 __pycache__/
+
+# 녹화 파일 (마스킹본이지만 저장소에 올리지 않음)
+agent/recordings/
