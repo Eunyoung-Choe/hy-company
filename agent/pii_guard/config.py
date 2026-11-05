@@ -33,6 +33,8 @@ class Config:
     fps: int
     capture_backend: str
     ring_slots: int
+    ocr_engine: str  # auto = Windows OCR 우선, 없으면 EasyOCR
+    winocr_scale: float
     ocr_gpu: bool
     ocr_langs: list[str]
     ocr_scale: float
@@ -47,6 +49,8 @@ class Config:
     audit_bucket: str
     audit_interval: float
     session_id: str
+    record_dir: Path
+    record_fps: int
 
     @staticmethod
     def from_env() -> "Config":
@@ -57,6 +61,8 @@ class Config:
             fps=int(e("CAPTURE_FPS", "60")),
             capture_backend=e("CAPTURE_BACKEND", "auto").lower(),
             ring_slots=int(e("RING_SLOTS", "4")),
+            ocr_engine=e("OCR_ENGINE", "auto").lower(),
+            winocr_scale=float(e("WINOCR_SCALE", "1.0")),
             ocr_gpu=e("OCR_GPU", "auto").lower() != "false",
             ocr_langs=[s.strip() for s in e("OCR_LANGS", "ko,en").split(",") if s.strip()],
             ocr_scale=float(e("OCR_SCALE", "0.5")),
@@ -72,4 +78,6 @@ class Config:
             audit_bucket=e("AUDIT_BUCKET", "pii-audit"),
             audit_interval=float(e("AUDIT_INTERVAL_SEC", "10")),
             session_id=e("SESSION_ID", os.environ.get("COMPUTERNAME", "agent")).lower(),
+            record_dir=Path(e("RECORD_DIR") or Path(__file__).resolve().parent.parent / "recordings"),
+            record_fps=int(e("RECORD_FPS", "15")),
         )

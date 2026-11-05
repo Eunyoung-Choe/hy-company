@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .config import Config, load_env_file
 from .masker import VerifiedState
+from .recorder import Recorder
 from .ring import RingBuffer
 from .server import make_server
 from .workers import (LatestJpeg, Stats, audit_loop, capture_loop, capture_rect,
@@ -30,6 +31,7 @@ def main() -> None:
     out = LatestJpeg()
     audit_q: queue.Queue = queue.Queue(maxsize=8)
     stop = threading.Event()
+    recorder = Recorder(cfg.record_dir, cfg.record_fps)
 
     def set_sharing(on: bool) -> None:
         if on:
@@ -55,12 +57,16 @@ def main() -> None:
             "audit_uploaded": stats.audit_uploaded,
             "audit_failed": stats.audit_failed,
             "capture_rect": rect,
+            "recording": recorder.recording,
+            "recording_sec": round(recorder.elapsed()),
+            "last_recording": recorder.last_file,
+            "recording_error": recorder.error,
         }
 
     threads = [
         threading.Thread(target=capture_loop, args=(cfg, rect, ring, stats, stop), name="capture", daemon=True),
         threading.Thread(target=ocr_loop, args=(cfg, ring, state, stats, audit_q, stop), name="ocr", daemon=True),
-        threading.Thread(target=output_loop, args=(cfg, ring, state, out, stats, stop), name="output", daemon=True),
+        threading.Thread(target=output_loop, args=(cfg, ring, state, out, stats, stop, recorder), name="output", daemon=True),
     ]
     if stats.audit_enabled:
         threads.append(threading.Thread(target=audit_loop, args=(cfg, audit_q, stats, stop),
@@ -70,7 +76,7 @@ def main() -> None:
     for t in threads:
         t.start()
 
-    srv = make_server(cfg.stream_host, cfg.stream_port, out, status, set_sharing, cfg.allowed_origins)
+    srv = make_server(cfg.stream_host, cfg.stream_port, out, status, set_sharing, cfg.allowed_origins, recorder)
     threading.Thread(target=srv.serve_forever, name="http", daemon=True).start()
     log.info("캡처 영역 %s", rect)
     log.info("송출: http://%s:%d/stream.mjpg  상태: /status", cfg.stream_host, cfg.stream_port)
@@ -81,6 +87,7 @@ def main() -> None:
             time.sleep(0.5)
     finally:
         stop.set()
+        recorder.stop()  # 녹화 중에 종료해도 MP4가 깨지지 않게 마무리
         srv.shutdown()
         ring.wipe()
         log.info("종료: Ring Buffer 를 0으로 덮어썼습니다.")

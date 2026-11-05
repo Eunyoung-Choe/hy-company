@@ -5,3 +5,12 @@ opencv-python-headless>=4.10
 easyocr>=1.7
 requests>=2.32
 dxcam>=0.0.5   # Windows 고속 캡처 (없으면 mss로 자동 전환)
+# Windows 내장 OCR (EasyOCR보다 20배 이상 빠름, 한국어 OCR 언어팩 필요)
+winrt-runtime>=3; sys_platform == "win32"
+winrt-Windows.Foundation>=3; sys_platform == "win32"
+winrt-Windows.Foundation.Collections>=3; sys_platform == "win32"
+winrt-Windows.Globalization>=3; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging>=3; sys_platform == "win32"
+winrt-Windows.Media.Ocr>=3; sys_platform == "win32"
+winrt-Windows.Storage.Streams>=3; sys_platform == "win32"
+imageio-ffmpeg>=0.5   # 녹화 MP4(H.264) 인코딩 (없으면 OpenCV mp4v로 저장)

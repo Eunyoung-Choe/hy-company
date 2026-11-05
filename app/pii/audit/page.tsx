@@ -2,7 +2,7 @@ import { connection } from 'next/server';
 import { AUDIT_BUCKET, getSupabaseAdmin, type AuditLog } from '@/lib/supabase-admin';
 import { piiLabel } from '@/lib/pii';
 
-export const metadata = { title: '감사 로그 · PII Guard' };
+export const metadata = { title: '감사 로그' };
 
 async function loadLogs() {
   await connection(); // 요청마다 최신 로그 조회 (빌드 시 미리 렌더링하지 않음)

@@ -19,7 +19,47 @@ type Status = {
   audit_enabled: boolean;
   audit_uploaded: number;
   audit_failed: number;
+  recording: boolean;
+  recording_sec: number;
+  last_recording: string | null;
+  recording_error: string | null;
 };
+
+// 크롬·엣지의 '다른 이름으로 저장' 창 (File System Access API). TS 기본 타입에 없어 직접 선언
+type SavePicker = (opts: {
+  suggestedName?: string;
+  types?: { description: string; accept: Record<string, string[]> }[];
+}) => Promise<{ createWritable: () => Promise<WritableStream<Uint8Array>> }>;
+
+/** 녹화 파일을 '다른 이름으로 저장' 창으로 저장. 창을 지원하지 않으면 일반 다운로드. */
+async function saveRecording(name: string): Promise<'saved' | 'cancel' | 'download'> {
+  const url = `${AGENT}/recordings/${name}`;
+  const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+  if (picker) {
+    try {
+      // 저장 창은 버튼 클릭 직후에만 열 수 있어서, 파일을 받기 전에 먼저 띄운다
+      const handle = await picker({
+        suggestedName: name,
+        types: [{ description: 'MP4 동영상', accept: { 'video/mp4': ['.mp4'] } }],
+      });
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok || !res.body) throw new Error(`녹화 파일을 받지 못했습니다 (HTTP ${res.status})`);
+      await res.body.pipeTo(await handle.createWritable()); // 다 쓰면 파일이 자동으로 닫힘
+      return 'saved';
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return 'cancel'; // 사용자가 취소
+      if (!(e instanceof DOMException && e.name === 'SecurityError')) throw e;
+      // 클릭 후 시간이 지나 창을 못 연 경우 → 일반 다운로드로
+    }
+  }
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  return 'download';
+}
+
+const mmss = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 
 export default function Viewer() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -27,6 +67,39 @@ export default function Viewer() {
   const [streamKey, setStreamKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [recBusy, setRecBusy] = useState(false);
+  const [recError, setRecError] = useState<string | null>(null);
+  const [recNote, setRecNote] = useState<string | null>(null);
+
+  const save = async (name: string) => {
+    try {
+      const r = await saveRecording(name);
+      setRecNote(r === 'saved' ? `저장했습니다: ${name}` : r === 'cancel' ? '저장을 취소했습니다. 아래 버튼으로 다시 저장할 수 있어요.' : null);
+    } catch (e) {
+      setRecError(e instanceof Error ? e.message : '저장 실패');
+    }
+  };
+
+  // 녹화 시작/종료. 종료하면 에이전트가 MP4 파일을 마무리한 뒤 응답한다
+  const setRecording = async (on: boolean) => {
+    setRecBusy(true);
+    setRecError(null);
+    setRecNote(null);
+    let saved: string | null = null;
+    try {
+      const r = await fetch(`${AGENT}/record?action=${on ? 'start' : 'stop'}`, { method: 'POST', cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status === 403 ? '허용되지 않은 주소입니다 (ALLOWED_ORIGINS 확인)' : `HTTP ${r.status}`);
+      const s = (await r.json()) as Status;
+      setStatus(s);
+      if (s.recording_error) setRecError(s.recording_error);
+      else if (!on && s.last_recording) saved = s.last_recording;
+    } catch (e) {
+      setRecError(e instanceof Error ? e.message : '녹화 전환 실패');
+    } finally {
+      setRecBusy(false);
+    }
+    if (saved) await save(saved); // 녹화 종료 → 바로 '다른 이름으로 저장' 창
+  };
 
   const setSharing = async (on: boolean) => {
     setBusy(true);
@@ -71,6 +144,7 @@ export default function Viewer() {
 
   const sharing = status?.sharing ?? true;
   const verifying = status && (!status.ocr_ready || status.pending_regions > 0);
+  const recording = !!status?.recording;
 
   return (
     <div className="viewer">
@@ -94,6 +168,7 @@ export default function Viewer() {
             )}
           </div>
         )}
+        {online && recording && <span className="rec-badge">● REC {mmss(status?.recording_sec ?? 0)}</span>}
         {online && sharing && (
           <span className={`badge ${verifying ? 'warn' : 'ok'}`}>
             {verifying ? '화면 갱신 중 (검증 대기)' : '검증 완료'}
@@ -115,6 +190,27 @@ export default function Viewer() {
           </button>
         </div>
         {toggleError && <p className="toggle-error">{toggleError}</p>}
+
+        <div className="record">
+          <button
+            type="button"
+            className={recording ? 'btn-rec-stop' : 'btn-rec'}
+            disabled={!online || recBusy}
+            onClick={() => setRecording(!recording)}
+          >
+            {recBusy
+              ? recording ? '저장 중…' : '시작 중…'
+              : recording ? `■ 녹화 종료 (${mmss(status?.recording_sec ?? 0)})` : '● 녹화 시작'}
+          </button>
+          {!recording && status?.last_recording && (
+            <button type="button" className="btn-rec-save" onClick={() => save(status.last_recording!)}>
+              💾 다른 이름으로 저장 ({status.last_recording})
+            </button>
+          )}
+          <small className="muted">마스킹된 화면만 MP4로 녹화됩니다. 종료하면 저장 창이 열립니다.</small>
+          {recNote && <small className="rec-note">{recNote}</small>}
+          {recError && <p className="toggle-error">{recError}</p>}
+        </div>
 
         <h3>처리 상태</h3>
         <dl className="metrics">
@@ -151,7 +247,8 @@ export default function Viewer() {
         <h3>표시 규칙</h3>
         <ul className="legend">
           <li><span className="sw black" /> 검은 박스: 감지된 개인정보</li>
-          <li><span className="sw mosaic" /> 모자이크: OCR 검증 전 변경 영역</li>
+          <li><span className="sw mosaic" /> 모자이크: 새로 나타나 아직 검증 전인 영역 (보통 0.1~0.5초)</li>
+          <li>검증 중인 영역은 직전 검증 화면을 스크롤에 맞춰 옮겨 보여줍니다</li>
         </ul>
       </aside>
     </div>

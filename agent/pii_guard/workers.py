@@ -7,14 +7,19 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
 from .config import Config
 from .detect import Hit, detect
-from .masker import DIFF_SCALE, Verified, VerifiedState, black_boxes, diff_key, mask_frame
+from .masker import (DIFF_SCALE, Verified, VerifiedState, black_boxes, diff_key, estimate_scroll,
+                     exposed_rows, mask_frame, shift_hits, shift_rows)
 from .ring import RingBuffer
+
+if TYPE_CHECKING:
+    from .recorder import Recorder
 
 log = logging.getLogger("pii_guard")
 
@@ -139,8 +144,86 @@ def capture_loop(cfg: Config, rect: dict, ring: RingBuffer, stats: Stats, stop: 
 
 
 # ---------- 2단계: OCR + Regex (GPU 가능 시 GPU) ----------
-def _ocr_process_main(conn, langs: list[str], want_gpu: bool, threads: int, scale: float) -> None:
-    """별도 프로세스에서 EasyOCR 실행. 무거운 OCR이 캡처/송출 스레드의 CPU·GIL을 뺏지 않는다."""
+class WinOcr:
+    """Windows 내장 OCR (Windows.Media.Ocr). CPU만으로 EasyOCR보다 20배 이상 빠르고,
+    단어별 박스를 돌려줘 마스킹 위치도 더 정확하다. 한국어 OCR 언어팩이 있어야 한다."""
+
+    def __init__(self, langs: list[str], scale: float):
+        import asyncio
+
+        from winrt.windows.globalization import Language
+        from winrt.windows.media.ocr import OcrEngine
+
+        lang = next((Language(t) for t in langs if OcrEngine.is_language_supported(Language(t))), None)
+        if lang is None:
+            raise RuntimeError(f"Windows OCR 언어팩 없음: {langs}")
+        # 엔진 하나는 동시에 한 장만 인식할 수 있어서, 띠마다 엔진을 따로 쓴다
+        self._new = lambda: OcrEngine.try_create_from_language(lang)
+        self._engines = [self._new()]
+        self.scale = scale
+        self._loop = asyncio.new_event_loop()
+
+    def _bitmap(self, bgr: np.ndarray):
+        from winrt.windows.graphics.imaging import BitmapAlphaMode, BitmapPixelFormat, SoftwareBitmap
+        from winrt.windows.storage.streams import DataWriter
+
+        h, w = bgr.shape[:2]
+        dw = DataWriter()
+        dw.write_bytes(cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA).tobytes())
+        return SoftwareBitmap.create_copy_from_buffer(dw.detach_buffer(), BitmapPixelFormat.BGRA8,
+                                                      w, h, BitmapAlphaMode.PREMULTIPLIED)
+
+    def run(self, job: list[tuple[np.ndarray, int]]) -> list[Hit]:
+        import asyncio
+
+        from .detect import detect_words
+
+        sc = self.scale
+        imgs = [img if sc >= 1 else cv2.resize(img, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA)
+                for img, _ in job]
+
+        while len(self._engines) < len(imgs):
+            self._engines.append(self._new())
+
+        async def all_strips():  # 띠 여러 개를 동시에 인식 (WinRT 스레드풀에서 병렬 실행)
+            return await asyncio.gather(*(e.recognize_async(self._bitmap(i))
+                                          for e, i in zip(self._engines, imgs)))
+
+        results = self._loop.run_until_complete(all_strips())
+        k = 1 / sc if sc < 1 else 1.0
+        hits: list[Hit] = []
+        for res, (_, y_off) in zip(results, job):
+            lines = [[(w.text, (round(w.bounding_rect.x * k), round(w.bounding_rect.y * k) + y_off,
+                                round((w.bounding_rect.x + w.bounding_rect.width) * k),
+                                round((w.bounding_rect.y + w.bounding_rect.height) * k) + y_off))
+                      for w in line.words] for line in res.lines]
+            hits += detect_words(lines, pad=max(2, round(6 * min(sc, 1))))
+            del lines  # 인식된 텍스트(평문 PII)는 좌표만 뽑은 뒤 바로 버린다
+        del results, imgs
+        return hits
+
+
+def _ocr_process_main(conn, engine: str, langs: list[str], want_gpu: bool, threads: int,
+                      scale: float, win_scale: float) -> None:
+    """별도 프로세스에서 OCR 실행. 무거운 OCR이 캡처/송출 스레드의 CPU·GIL을 뺏지 않는다."""
+    if engine in ("auto", "windows"):
+        try:
+            win = WinOcr(langs, win_scale)
+        except Exception as ex:
+            if engine == "windows":
+                raise
+            logging.getLogger("pii_guard").warning("Windows OCR 사용 불가 → EasyOCR (%s)", ex)
+        else:
+            conn.send(("ready", "windows"))
+            while True:
+                job = conn.recv()
+                if job is None:
+                    break
+                hits = win.run(job)
+                del job
+                conn.send(hits)
+            return
+
     import easyocr
     import torch
 
@@ -148,7 +231,7 @@ def _ocr_process_main(conn, langs: list[str], want_gpu: bool, threads: int, scal
     if not gpu:
         torch.set_num_threads(threads)
     reader = easyocr.Reader(langs, gpu=gpu, verbose=False)
-    conn.send(("ready", gpu))
+    conn.send(("ready", "easyocr-gpu" if gpu else f"easyocr-cpu x{threads}"))
     while True:
         job = conn.recv()
         if job is None:
@@ -171,11 +254,12 @@ class OcrWorker:
         ctx = mp.get_context("spawn")
         self._conn, child = ctx.Pipe()
         self._proc = ctx.Process(target=_ocr_process_main, name="pii-ocr", daemon=True,
-                                 args=(child, cfg.ocr_langs, cfg.ocr_gpu, cfg.ocr_threads, cfg.ocr_scale))
+                                 args=(child, cfg.ocr_engine, cfg.ocr_langs, cfg.ocr_gpu, cfg.ocr_threads,
+                                       cfg.ocr_scale, cfg.winocr_scale))
         self._proc.start()
-        log.info("EasyOCR 로딩 중 (별도 프로세스, langs=%s)", cfg.ocr_langs)
-        _, gpu = self._conn.recv()
-        log.info("EasyOCR 준비 완료 (gpu=%s, threads=%d)", gpu, cfg.ocr_threads)
+        log.info("OCR 로딩 중 (별도 프로세스, engine=%s, langs=%s)", cfg.ocr_engine, cfg.ocr_langs)
+        _, self.engine = self._conn.recv()
+        log.info("OCR 준비 완료 (%s)", self.engine)
 
     def run(self, strips: list[tuple[np.ndarray, int]]) -> list[Hit]:
         self._conn.send(strips)
@@ -245,16 +329,26 @@ def _ocr_main_loop(cfg, ring, state, stats, audit_q, stop, ocr, pending_regions)
         h = frame.shape[0]
         cur_key = diff_key(frame)
 
-        if prev.ref_key is None:
+        base_ref, base_hits = prev.ref_key, prev.hits
+        if base_ref is None:
             strips = [(0, h)]
         else:
-            regions = pending_regions(frame, prev.ref_key)
+            extra = []
+            dy = estimate_scroll(cur_key, base_ref)
+            if dy:
+                # 스크롤: 검증된 기준과 PII 박스를 같이 밀고, 새로 드러난 띠만 OCR (전체 OCR 대신)
+                dy_px = round(dy / DIFF_SCALE)
+                base_ref = shift_rows(base_ref, dy, cur_key)
+                base_hits = shift_hits(base_hits, dy_px, h)
+                e0, e1 = exposed_rows(dy_px, h)
+                extra = [(0, e0, frame.shape[1], e1 - e0)]
+            regions = pending_regions(frame, base_ref) + extra
             if not regions:  # 검증된 상태와 같음 → OCR 생략 (CPU 절약)
                 frame.fill(0)
                 del frame
                 time.sleep(0.03)
                 continue
-            strips = _strips(regions, prev.hits, h)
+            strips = _strips(regions, base_hits, h)
             if sum(b - a for a, b in strips) > FULL_OCR_RATIO * h:
                 strips = [(0, h)]
 
@@ -264,8 +358,8 @@ def _ocr_main_loop(cfg, ring, state, stats, audit_q, stop, ocr, pending_regions)
             ref_key = cur_key
         else:
             # 띠 밖의 기존 결과는 유지, 띠 안은 새로 OCR
-            hits = [x for x in prev.hits if not any(x.box[1] < b and x.box[3] > a for a, b in strips)]
-            ref_key = prev.ref_key.copy()  # 띠 밖은 옛 기준 유지 (서서히 바뀌는 화면도 결국 감지)
+            hits = [x for x in base_hits if not any(x.box[1] < b and x.box[3] > a for a, b in strips)]
+            ref_key = base_ref.copy()  # 띠 밖은 옛 기준 유지 (서서히 바뀌는 화면도 결국 감지)
             hits += ocr.run([(frame[a:b], a) for a, b in strips])
             for a, b in strips:
                 ka, kb = int(a * DIFF_SCALE), int(b * DIFF_SCALE)
@@ -314,18 +408,18 @@ class LatestJpeg:
             return self._n, self._jpeg
 
 
-def _off_jpeg(ring: RingBuffer, scale: float) -> bytes:
+def _off_frame(ring: RingBuffer, scale: float) -> np.ndarray:
     h, w = ring.shape
     h, w = max(1, int(h * min(scale, 1))), max(1, int(w * min(scale, 1)))
     img = np.full((h, w, 3), 24, np.uint8)
     text = "REMOTE OFF"
     (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 2)
     cv2.putText(img, text, ((w - tw) // 2, (h + th) // 2), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (200, 200, 200), 2)
-    return cv2.imencode(".jpg", img)[1].tobytes()
+    return img
 
 
 def output_loop(cfg: Config, ring: RingBuffer, state: VerifiedState, out: LatestJpeg,
-                stats: Stats, stop: threading.Event) -> None:
+                stats: Stats, stop: threading.Event, recorder: "Recorder | None" = None) -> None:
     """송출 해상도로 먼저 줄인 뒤 마스킹 → JPEG. 원본 해상도 연산을 하지 않아 빠르다."""
     seq, seen_version = -1, -1
     params = [cv2.IMWRITE_JPEG_QUALITY, cfg.jpeg_quality]
@@ -333,7 +427,10 @@ def output_loop(cfg: Config, ring: RingBuffer, state: VerifiedState, out: Latest
     while not stop.is_set():
         if not stats.sharing.is_set():
             if was_sharing:  # 꺼진 순간 '원격 꺼짐' 화면을 한 번 내보내 마지막 화면이 남지 않게
-                out.put(_off_jpeg(ring, cfg.stream_scale))
+                off = _off_frame(ring, cfg.stream_scale)
+                out.put(cv2.imencode(".jpg", off)[1].tobytes())
+                if recorder is not None:
+                    recorder.offer(off)  # 녹화 중이면 꺼진 동안은 이 화면으로 채운다
                 was_sharing = False
                 stats.pending_regions = 0
             time.sleep(0.1)
@@ -350,6 +447,8 @@ def output_loop(cfg: Config, ring: RingBuffer, state: VerifiedState, out: Latest
         masked, pending = mask_frame(frame, state.get())
         stats.pending_regions = pending
         ok, jpg = cv2.imencode(".jpg", masked, params)
+        if recorder is not None:
+            recorder.offer(masked)  # 녹화도 송출과 똑같은 마스킹 완성본만 받는다
         del frame, masked
         if ok:
             out.put(jpg.tobytes())  # 마스킹된 결과물만 송출 버퍼로 간다

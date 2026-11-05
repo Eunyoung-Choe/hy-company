@@ -1,6 +1,6 @@
 import Viewer from './Viewer';
 
-export const metadata = { title: '원격 화면 · PII Guard' };
+export const metadata = { title: '원격 화면' };
 
 export default function ViewerPage() {
   return (

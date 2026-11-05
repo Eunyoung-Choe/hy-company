@@ -1,0 +1,111 @@
+/* PII Guard 전용 스타일. 모든 선택자를 .pii 아래로 한정해 다른 서비스(VideoDigest) 화면에 영향 없음 */
+.pii { min-height: 100vh; }
+.pii p { margin: 1em 0; }  /* 루트 globals.css의 p { margin: 0 } 되돌림 */
+.pii {
+  --bg: #f6f7f9;
+  --fg: #1b1f24;
+  --muted: #6b7280;
+  --line: #e3e6ea;
+  --card: #fff;
+  --accent: #2557d6;
+  --ok: #157f3b;
+  --warn: #b45309;
+}
+
+.pii * { box-sizing: border-box; }
+.pii { margin: 0; font-family: system-ui, 'Malgun Gothic', sans-serif; background: var(--bg); color: var(--fg); line-height: 1.55; }
+.pii a { color: var(--accent); }
+.pii code { background: #eef0f3; padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+.pii h1 { margin: 0 0 6px; font-size: 26px; }
+.pii h2 { margin: 36px 0 12px; font-size: 19px; }
+.pii h3 { margin: 0 0 10px; font-size: 15px; }
+.pii .muted { color: var(--muted); }
+.pii .lead { margin: 0 0 24px; color: var(--muted); }
+
+.pii .topbar { display: flex; align-items: center; gap: 28px; padding: 12px 28px; background: #111827; }
+.pii .topbar a { color: #e5e7eb; text-decoration: none; font-size: 14px; }
+.pii .topbar a:hover { color: #fff; }
+.pii .topbar .brand { font-weight: 700; font-size: 16px; color: #fff; }
+.pii .topbar nav { display: flex; gap: 20px; }
+
+.pii .page { max-width: 1040px; margin: 0 auto; padding: 32px 24px 60px; }
+.pii .page.wide { max-width: 1400px; }
+.pii .page.narrow { max-width: 760px; }
+.pii .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+
+.pii .flow { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.pii .flow p { margin: 8px 0 0; font-size: 14px; }
+.pii .flow small { color: var(--muted); }
+.pii .step-n { font-size: 12px; font-weight: 700; color: var(--accent); }
+.pii .howto li { margin-bottom: 6px; }
+
+/* 데모 자료: OCR이 잘 읽도록 큰 글씨, 높은 대비 */
+.pii .hint { font-size: 14px; color: var(--muted); }
+.pii .demo { display: grid; gap: 14px; }
+.pii .demo-bar { display: flex; justify-content: space-between; align-items: center; }
+.pii .demo-bar button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
+.pii .doc { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; font-size: 18px; }
+.pii .doc h3 { font-size: 14px; color: var(--muted); font-weight: 600; }
+.pii .doc p { margin: 0; }
+.pii .field { display: grid; grid-template-columns: 140px 1fr; padding: 7px 0; border-top: 1px solid #f0f1f3; }
+.pii .field:first-of-type { border-top: 0; }
+.pii .field-label { color: #4b5563; }
+.pii .field-value { font-weight: 600; letter-spacing: .02em; }
+.pii .otp p { font-size: 26px; font-weight: 700; letter-spacing: .08em; }
+
+/* 원격 화면 */
+.pii .viewer { display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
+.pii .screen { position: relative; background: #0b0f14; border-radius: 10px; overflow: hidden; min-height: 360px; display: grid; place-items: center; }
+.pii .screen img { display: block; width: 100%; height: auto; }
+.pii .screen-empty { color: #cbd5e1; display: grid; gap: 6px; text-align: center; padding: 40px; }
+.pii .badge { position: absolute; top: 10px; left: 10px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; color: #fff; }
+.pii .badge.ok { background: var(--ok); }
+.pii .badge.warn { background: var(--warn); }
+.pii .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.pii .panel h3 { margin-top: 18px; }
+.pii .panel h3:first-child { margin-top: 0; }
+.pii .metrics { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
+.pii .metrics dt { color: var(--muted); }
+.pii .metrics dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.pii .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.pii .chip { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: #eef2ff; color: #3730a3; }
+.pii .legend { list-style: none; padding: 0; margin: 0; font-size: 13px; display: grid; gap: 6px; }
+.pii .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+.pii .sw.black { background: #000; }
+.pii .sw.mosaic { background: repeating-conic-gradient(#9ca3af 0 25%, #d1d5db 0 50%) 0 0 / 7px 7px; }
+
+/* 감사 로그 */
+.pii .notice p { margin: 6px 0 0; }
+.pii .notice.error { border-color: #fca5a5; color: #991b1b; }
+.pii .audit-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.pii .audit-item { padding: 10px; }
+.pii .audit-item img { width: 100%; border-radius: 6px; display: block; background: #0b0f14; }
+.pii .img-missing { aspect-ratio: 16 / 9; display: grid; place-items: center; background: #f3f4f6; color: var(--muted); border-radius: 6px; }
+
+@media (max-width: 900px) {
+  .pii .viewer { grid-template-columns: 1fr; }
+}
+
+/* 원격 on/off */
+.pii .remote-toggle { display: flex; align-items: center; gap: 8px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.pii .remote-toggle strong { flex: 1; font-size: 15px; }
+.pii .remote-toggle button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 0; color: #fff; cursor: pointer; }
+.pii .remote-toggle button:disabled { opacity: .5; cursor: default; }
+.pii .btn-off { background: #b91c1c; }
+.pii .btn-on { background: var(--ok); }
+.pii .dot { width: 10px; height: 10px; border-radius: 50%; }
+.pii .dot.on { background: #22c55e; box-shadow: 0 0 0 3px #dcfce7; }
+.pii .dot.off { background: #9ca3af; }
+.pii .toggle-error { margin: -6px 0 12px; font-size: 12px; color: #b91c1c; }
+
+/* 녹화 */
+.pii .rec-badge { position: absolute; top: 10px; right: 10px; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 99px; color: #fff; background: #dc2626; animation: pii-rec-blink 1.2s ease-in-out infinite; }
+@keyframes pii-rec-blink { 50% { opacity: .55; } }
+.pii .record { display: grid; gap: 6px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.pii .record button { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 12px; border-radius: 8px; border: 0; color: #fff; cursor: pointer; }
+.pii .record button:disabled { opacity: .5; cursor: default; }
+.pii .btn-rec { background: #dc2626; }
+.pii .btn-rec-stop { background: #1f2937; }
+.pii .record .btn-rec-save { background: #fff; color: var(--text, #111827); border: 1px solid var(--line); font-weight: 500; word-break: break-all; }
+.pii .rec-note { font-size: 12px; color: var(--ok); }
+.pii .record .toggle-error { margin: 0; }
