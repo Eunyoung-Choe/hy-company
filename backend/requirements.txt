@@ -1,0 +1,12 @@
+# 로컬 실행용 전체 목록. Colab에서는 노트북 1번 셀이 부족한 패키지만 설치합니다.
+flask>=3.0
+flask-cors>=4.0
+pyngrok>=7.0
+torch>=2.2
+torchvision>=0.17
+transformers>=4.49
+opencv-python-headless>=4.9
+numpy>=1.26
+openai>=1.99
+python-dotenv>=1.0
+pillow>=10.0

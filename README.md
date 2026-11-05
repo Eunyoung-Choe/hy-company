@@ -5,7 +5,7 @@
 
 ```
 agent/   Python 마스킹 에이전트 (캡처 → OCR/Regex → 마스킹 → 송출·감사 로그)
-app/     Next.js 화면  /demo 데모 자료 · /viewer 원격 화면 · /audit 감사 로그
+app/     Next.js 화면  /pii (PII Guard 홈) · /pii/demo 데모 자료 · /pii/viewer 원격 화면 · /pii/audit 감사 로그
 supabase/migrations/  감사 로그 테이블 + 비공개 Storage 버킷
 ```
 
@@ -42,18 +42,18 @@ cp .env.example .env         # 캡처 영역, Supabase 값 입력
 NVIDIA GPU가 있으면 CUDA용 torch를 따로 설치해야 GPU로 동작합니다.
 
 ### 3) 시연
-모니터가 하나라면 `/demo` 창은 왼쪽 절반에, `/viewer` 창은 오른쪽 절반에 두세요.
+모니터가 하나라면 `/pii/demo` 창은 왼쪽 절반에, `/pii/viewer` 창은 오른쪽 절반에 두세요.
 그리고 `agent/.env`에서 `CAPTURE_REGION`을 왼쪽 절반으로 지정합니다(예: `0,0,960,1040`).
 뷰어 창까지 캡처하면 화면 속 화면이 무한히 반복됩니다.
-`/demo`에서 **새 고객 불러오기**를 누르면 바뀐 영역이 모자이크 → 검은 박스로 바뀌는 과정을 볼 수 있습니다.
+`/pii/demo`에서 **새 고객 불러오기**를 누르면 바뀐 영역이 모자이크 → 검은 박스로 바뀌는 과정을 볼 수 있습니다.
 
 ### 4) 감사 로그 DB
 ```bash
 npx supabase db push --remote
 ```
-`/audit`와 에이전트는 **Secret key**를 씁니다. 이 키는 서버와 에이전트 전용입니다.
+`/pii/audit`와 에이전트는 **Secret key**를 씁니다. 이 키는 서버와 에이전트 전용입니다.
 테이블과 버킷은 anon/authenticated 권한이 없고, 이미지는 10분짜리 서명 URL로만 열립니다.
-> `/audit`에는 로그인이 없습니다. Vercel에 배포하는 환경에는 `SUPABASE_SECRET_KEY`를 넣지 말거나, 먼저 인증을 추가하세요.
+> `/pii/audit`에는 로그인이 없습니다. Vercel에 배포하는 환경에는 `SUPABASE_SECRET_KEY`를 넣지 말거나, 먼저 인증을 추가하세요.
 
 ## 확인
 - 웹: `npm run typecheck`, `npm run build`
