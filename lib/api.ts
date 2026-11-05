@@ -9,9 +9,7 @@ const HEADERS = { 'ngrok-skip-browser-warning': 'true' };
 export type Keyframe = { time: number; time_label: string; image: string; caption: string; failed?: boolean };
 
 export type Metrics = {
-  backend: 'local' | 'openai';
   engine: string;
-  billed_cost_usd: number;
   reasoning_tokens: number;
   actual_tokens: number;
   actual_input_tokens: number;
@@ -64,15 +62,13 @@ async function readJson<T>(res: Response): Promise<T> {
   return data as T;
 }
 
-export type Engine = 'local' | 'openai';
-
+// 이전 버전 백엔드와도 동작하도록 필드는 선택 항목
 export type Health = {
   status: string;
-  default_engine: Engine;
-  engines: Engine[];
-  engine_models: Record<Engine, string>;
-  models_ready: boolean;
-  busy: boolean;
+  model?: string;
+  openai_key?: boolean;
+  models_ready?: boolean;
+  busy?: boolean;
 };
 
 export async function getHealth(): Promise<Health> {
@@ -80,10 +76,9 @@ export async function getHealth(): Promise<Health> {
   return readJson<Health>(res);
 }
 
-export async function uploadVideo(file: File, engine?: Engine): Promise<string> {
+export async function uploadVideo(file: File): Promise<string> {
   const body = new FormData();
   body.append('video', file);
-  if (engine) body.append('engine', engine);
   let res: Response;
   try {
     res = await fetch(`${requireApiUrl()}/api/upload`, { method: 'POST', body, headers: HEADERS });

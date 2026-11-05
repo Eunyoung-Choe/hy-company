@@ -25,27 +25,26 @@ cells = [
     md("""
 # 🎬 VideoDigest 백엔드 (Colab + ngrok)
 
-3·4단계(캡션·요약)는 **Qwen2.5-VL-3B-Instruct** 를 이 Colab GPU에서 직접 실행합니다. API 키·비용이 필요 없습니다.
+1·2단계(OpenCV·DINOv2)는 이 Colab에서, 3·4단계(캡션·요약)는 OpenAI **gpt-5.4-mini** API로 처리합니다.
 
 **처음 한 번만 준비**
-1. 메뉴 **런타임 → 런타임 유형 변경 → T4 GPU** (필수 · CPU로는 너무 느립니다)
-2. 왼쪽 🔑 **Secrets** 에 아래 이름으로 값을 추가하고, 각 항목의 *노트북 액세스* 를 켭니다.
+1. 왼쪽 🔑 **Secrets** 에 아래 이름으로 값을 추가하고, 각 항목의 *노트북 액세스* 를 켭니다.
+   - `OPENAI_API_KEY` (필수) — OpenAI 키
    - `NGROK_AUTHTOKEN` (필수) — https://dashboard.ngrok.com/get-started/your-authtoken
    - `NGROK_DOMAIN` (권장) — ngrok 무료 고정 도메인 `xxx.ngrok-free.dev` (https://dashboard.ngrok.com/domains)
-   - `ALLOWED_ORIGINS` (선택) — 허용할 프론트 주소, 쉼표 구분
-   - `OPENAI_API_KEY` (선택) — 넣으면 화면에서 **GPT 엔진**(기본 `gpt-5.4-mini`)도 고를 수 있음
-   - `OPENAI_MODEL` (선택) — GPT 엔진 모델 이름 (기본 `gpt-5.4-mini`)
+   - `OPENAI_MODEL` (선택) — 모델 이름 (기본 `gpt-5.4-mini`)
    - `PRICE_INPUT_PER_1M`, `PRICE_OUTPUT_PER_1M` (선택) — 그 모델의 1M 토큰당 단가(USD), 대시보드 비용 계산용
+   - `ALLOWED_ORIGINS` (선택) — 허용할 프론트 주소, 쉼표 구분
+2. (선택) **런타임 → 런타임 유형 변경 → T4 GPU** 를 고르면 DINOv2가 더 빠릅니다. CPU로도 동작합니다.
 
-**실행**: 메뉴 **런타임 → 모두 실행**. 마지막 셀에 `🌐 공개 API URL` 이 나오면 접속 가능,
-`[VLM] 준비 완료` 가 나오면 모델까지 준비 완료입니다 (첫 실행은 모델 약 7GB 다운로드로 몇 분 걸림).
+**실행**: 메뉴 **런타임 → 모두 실행**. 마지막 셀에 `🌐 공개 API URL` 이 나오면 준비 완료입니다.
 마지막 셀이 실행 중인 동안만 서버가 살아 있습니다 (셀 중지 = 서버 종료).
 """),
-    md("## 1. 패키지 설치\nColab에 이미 있는 torch·opencv는 다시 설치하지 않습니다. Qwen2.5-VL은 transformers 4.49 이상이 필요합니다."),
+    md("## 1. 패키지 설치\nColab에 이미 있는 torch·transformers·opencv는 다시 설치하지 않습니다."),
     code("""
-!pip -q install flask flask-cors pyngrok openai python-dotenv "transformers>=4.49"
+!pip -q install flask flask-cors pyngrok openai python-dotenv
 import torch
-print("GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "없음 ✖ — 런타임 → 런타임 유형 변경 → T4 GPU")
+print("DINOv2 실행 장치:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU (동작함 · GPU면 더 빠름)")
 """),
     md("## 2. Secrets → 환경변수\n값은 화면에 출력하지 않습니다."),
     code("""
@@ -63,20 +62,18 @@ def secret(name, required=False):
         raise RuntimeError(f"Colab Secrets에 {name}이(가) 없거나 노트북 액세스가 꺼져 있습니다.")
     print(f"{name:16s}: {'설정됨 ✔' if value else ('없음 ✖' if required else '없음 (선택)')}")
 
+secret("OPENAI_API_KEY", required=True)
 secret("NGROK_AUTHTOKEN", required=True)
 secret("NGROK_DOMAIN")
-secret("ALLOWED_ORIGINS")
-secret("CAPTION_BACKEND")       # 선택 · 기본 local(Qwen2.5-VL). openai로 두면 Qwen을 로드하지 않음
-secret("OPENAI_API_KEY", required=os.environ.get("CAPTION_BACKEND", "local").lower() == "openai")
-secret("OPENAI_MODEL")          # 선택 · GPT 엔진 모델 (기본 gpt-5.4-mini)
+secret("OPENAI_MODEL")          # 선택 · 기본 gpt-5.4-mini
 secret("PRICE_INPUT_PER_1M")    # 선택 · 그 모델의 단가 → 대시보드 비용
 secret("PRICE_OUTPUT_PER_1M")
-secret("VLM_DTYPE")             # 선택 · Qwen 계산 정밀도 (기본 auto)
+secret("ALLOWED_ORIGINS")
 os.environ["PYTHONUNBUFFERED"] = "1"   # 로그(유사도 표)를 실시간 출력
 """),
     md("## 3. 백엔드 코드 저장\n`backend/app.py`와 같은 내용입니다. (수정은 app.py에서 하고 `python build_notebook.py`로 노트북을 다시 만드세요.)"),
     code("%%writefile app.py\n" + app_src),
-    md("## 4. 서버 실행 + ngrok 공개 URL\n이 셀은 계속 실행 상태로 둡니다. 출력에 모델 로드 상황, DINO 유사도 표, 캡션 등 처리 로그가 나옵니다."),
+    md("## 4. 서버 실행 + ngrok 공개 URL\n이 셀은 계속 실행 상태로 둡니다. 출력에 DINO 유사도 표, 캡션, 토큰 사용량 등 처리 로그가 나옵니다."),
     code("!python app.py"),
 ]
 
