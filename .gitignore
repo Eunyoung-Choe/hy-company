@@ -12,3 +12,7 @@ out/
 # Supabase CLI 개인 연결 정보
 supabase/.temp/
 supabase/.branches/
+
+# Python 에이전트
+agent/.venv/
+__pycache__/
