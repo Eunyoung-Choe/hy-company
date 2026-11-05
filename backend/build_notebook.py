@@ -33,7 +33,9 @@ cells = [
    - `NGROK_AUTHTOKEN` (필수) — https://dashboard.ngrok.com/get-started/your-authtoken
    - `NGROK_DOMAIN` (권장) — ngrok 무료 고정 도메인 `xxx.ngrok-free.dev` (https://dashboard.ngrok.com/domains)
    - `ALLOWED_ORIGINS` (선택) — 허용할 프론트 주소, 쉼표 구분
-   - `CAPTION_BACKEND` (선택) — `openai`로 두면 gpt-5-mini API 사용 (이때만 `OPENAI_API_KEY` 필요)
+   - `OPENAI_API_KEY` (선택) — 넣으면 화면에서 **GPT 엔진**(기본 `gpt-5.4-mini`)도 고를 수 있음
+   - `OPENAI_MODEL` (선택) — GPT 엔진 모델 이름 (기본 `gpt-5.4-mini`)
+   - `PRICE_INPUT_PER_1M`, `PRICE_OUTPUT_PER_1M` (선택) — 그 모델의 1M 토큰당 단가(USD), 대시보드 비용 계산용
 
 **실행**: 메뉴 **런타임 → 모두 실행**. 마지막 셀에 `🌐 공개 API URL` 이 나오면 접속 가능,
 `[VLM] 준비 완료` 가 나오면 모델까지 준비 완료입니다 (첫 실행은 모델 약 7GB 다운로드로 몇 분 걸림).
@@ -64,11 +66,12 @@ def secret(name, required=False):
 secret("NGROK_AUTHTOKEN", required=True)
 secret("NGROK_DOMAIN")
 secret("ALLOWED_ORIGINS")
-secret("CAPTION_BACKEND")       # 선택 · 기본 local(Qwen2.5-VL). openai로 두면 아래 키 필요
+secret("CAPTION_BACKEND")       # 선택 · 기본 local(Qwen2.5-VL). openai로 두면 Qwen을 로드하지 않음
 secret("OPENAI_API_KEY", required=os.environ.get("CAPTION_BACKEND", "local").lower() == "openai")
-secret("OPENAI_MODEL")          # 선택 · openai일 때 모델 (기본 gpt-5-mini)
-secret("PRICE_INPUT_PER_1M")    # 선택 · 대시보드 'API 단가 환산' 비용
+secret("OPENAI_MODEL")          # 선택 · GPT 엔진 모델 (기본 gpt-5.4-mini)
+secret("PRICE_INPUT_PER_1M")    # 선택 · 그 모델의 단가 → 대시보드 비용
 secret("PRICE_OUTPUT_PER_1M")
+secret("VLM_DTYPE")             # 선택 · Qwen 계산 정밀도 (기본 auto)
 os.environ["PYTHONUNBUFFERED"] = "1"   # 로그(유사도 표)를 실시간 출력
 """),
     md("## 3. 백엔드 코드 저장\n`backend/app.py`와 같은 내용입니다. (수정은 app.py에서 하고 `python build_notebook.py`로 노트북을 다시 만드세요.)"),
