@@ -1,0 +1,9 @@
+# Vercel CLI 배포 업로드에서 제외 (개인 연결 정보·비밀값·생성물)
+.env*
+!.env.example
+.mcp.json
+.vercel
+supabase/.temp
+supabase/.branches
+node_modules
+.next
