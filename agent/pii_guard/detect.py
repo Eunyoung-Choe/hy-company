@@ -116,9 +116,20 @@ def _valid(kind: str, matched: str) -> bool:
     if kind == "CARD":
         return "*" in matched or bool(re.search(r"[\s-]", matched)) or luhn_ok(digits)
     if kind in ("ACCOUNT", "ACCOUNT_PART"):
-        # 하이픈(-)이 존재하고 숫자가 3자리 이상일 때만 허용 (일반 일반 텍스트/숫자 과마스킹 방지)
+        m = matched.strip()
+        if _DATE_LIKE.match(m):  # 2026-11-05, 2024-3 같은 날짜는 계좌 아님
+            return False
+        if kind == "ACCOUNT_PART":
+            if re.fullmatch(r"\d{6}-\d{7}", m):  # 주민번호 모양은 RRN 패턴이 판단 (13월 등 잘못된 값 제외)
+                return False
+            if not m.endswith("-") and len(digits) < 7:  # 12-34 같은 짧은 번호(시간·번호표 등) 제외
+                return False
+        # 하이픈(-)이 존재하고 숫자가 3자리 이상일 때만 허용 (일반 텍스트/숫자 과마스킹 방지)
         return "-" in matched and len(digits) >= 3
     return True
+
+
+_DATE_LIKE = re.compile(r"^(?:19|20)\d{2}-(?:0?[1-9]|1[0-2])(?:-(?:0?[1-9]|[12]\d|3[01]))?$")
 
 
 def find_spans(text: str) -> list[tuple[str, int, int]]:

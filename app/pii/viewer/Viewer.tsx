@@ -247,7 +247,8 @@ export default function Viewer() {
         <h3>표시 규칙</h3>
         <ul className="legend">
           <li><span className="sw black" /> 검은 박스: 감지된 개인정보</li>
-          <li><span className="sw mosaic" /> 모자이크: OCR 검증 전 변경 영역</li>
+          <li><span className="sw mosaic" /> 모자이크: 새로 나타나 아직 검증 전인 영역 (보통 0.1~0.5초)</li>
+          <li>검증 중인 영역은 직전 검증 화면을 스크롤에 맞춰 옮겨 보여줍니다</li>
         </ul>
       </aside>
     </div>

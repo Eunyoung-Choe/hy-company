@@ -162,3 +162,53 @@ class HoldVerified(unittest.TestCase):
         v = Verified(seq=0, ref_key=diff_key(base), masked_frame=base.copy())
         out, pending = mask_frame(base.copy(), v)
         self.assertEqual(pending, 0)
+
+
+def _page(h=1400, w=400, seed=0):
+    """글자처럼 보이는 무늬가 줄마다 다른 긴 페이지 (스크롤 테스트용)."""
+    rng = np.random.default_rng(seed)
+    page = np.full((h, w, 3), 230, np.uint8)
+    for y in range(10, h - 20, 22):
+        x = 10
+        while x < w - 30:
+            ww = int(rng.integers(8, 40))
+            page[y:y + 12, x:x + ww] = int(rng.integers(0, 90))
+            x += ww + int(rng.integers(4, 14))
+    return page
+
+
+class ScrollCompensation(unittest.TestCase):
+    def setUp(self):
+        from pii_guard.masker import DIFF_SCALE
+        self.page, self.view = _page(), 600
+        self.f0 = self.page[0:self.view].copy()
+        self.pii = (100, 300, 220, 316)  # 처음 화면의 개인정보 박스
+        held = self.f0.copy()
+        held[300:317, 100:221] = 0
+        self.v = Verified(seq=0, ref_key=diff_key(self.f0), hits=[Hit("RRN", self.pii)], masked_frame=held)
+        self.scale = DIFF_SCALE
+
+    def test_estimate_scroll(self):
+        from pii_guard.masker import estimate_scroll
+        for off in (10, 60, 200):
+            cur = diff_key(self.page[off:off + self.view])
+            self.assertEqual(estimate_scroll(cur, self.v.ref_key), round(-off * self.scale), off)
+        self.assertEqual(estimate_scroll(self.v.ref_key, self.v.ref_key), 0)  # 그대로면 0
+
+    def test_scrolled_frame_moves_box_and_shows_current_content(self):
+        off = 80
+        cur = self.page[off:off + self.view].copy()
+        out, pending = mask_frame(cur.copy(), self.v)
+        x0, y0, x1, y1 = self.pii
+        self.assertTrue((out[y0 - off:y1 - off + 1, x0:x1 + 1] == 0).all())  # 박스가 내용을 따라 이동
+        mid = slice(100, 200)  # 개인정보와 새로 드러난 띠를 뺀 곳은 지금 화면 그대로
+        self.assertTrue((out[mid] == cur[mid]).all())
+        self.assertEqual(pending, 1)  # 새로 드러난 띠 하나만 검증 대기
+
+    def test_new_content_during_scroll_is_still_held(self):
+        off = 80
+        cur = self.page[off:off + self.view].copy()
+        cur[150:170, 200:380] = 5  # 스크롤과 동시에 새로 뜬 내용 (검증 전)
+        out, pending = mask_frame(cur.copy(), self.v)
+        self.assertFalse((out[150:170, 200:380] == 5).all())  # 원본 그대로 송출되지 않음
+        self.assertGreaterEqual(pending, 2)

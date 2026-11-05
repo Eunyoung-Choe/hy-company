@@ -56,6 +56,123 @@ def pending_regions(frame: np.ndarray, ref_key: np.ndarray) -> list[tuple[int, i
     return _regions(diff_key(frame), ref_key, 1 / DIFF_SCALE)
 
 
+# ---------- 스크롤 보정 ----------
+# 스크롤하면 화면 전체가 '바뀐 영역'이 되어, 전체 OCR이 끝날 때까지 화면이 멈춘 것처럼 보였다.
+# 화면이 세로로 dy만큼 밀린 것을 찾으면, 검증된 기준 화면·PII 박스·검증본을 같이 밀고
+# 새로 드러난 띠만 검증 대기로 둔다. 밀어도 맞지 않는 곳(고정 헤더 등)은 그대로 '바뀐 영역'이라
+# Fail-closed는 유지된다.
+SCROLL_MIN_STD = 12.0    # 템플릿 띠의 최소 명암 편차 (빈 여백이면 위치를 못 잡으므로 포기)
+SCROLL_MAX_ERR = 0.05    # 정규화 제곱오차 허용치 (이보다 크면 스크롤이 아니라고 본다)
+SCROLL_CANDIDATES = 4  # 1/4 해상도에서 고르는 후보 위치 수
+
+
+_ref_cache: list = [None, None, None]  # [기준, 1/2, 1/4 크기] — 같은 검증본이면 다시 줄이지 않는다
+
+
+def _half(img: np.ndarray) -> np.ndarray:
+    return cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2), interpolation=cv2.INTER_AREA)
+
+
+def estimate_scroll(cur: np.ndarray, ref: np.ndarray) -> int:
+    """회색조 비교 이미지에서 cur[y] ≈ ref[y - dy] 인 dy를 찾는다. 스크롤이 아니면 0."""
+    h = cur.shape[0]
+    if ref.shape != cur.shape or h < 64:
+        return 0
+    if _ref_cache[0] is not ref:
+        half = _half(ref)
+        _ref_cache[:] = [ref, half, _half(half)]
+    ref_s, ref_q, cur_s = _ref_cache[1], _ref_cache[2], _half(cur)
+    hs = cur_s.shape[0]
+    bhs = max(8, hs // 12)
+    # 줄별 누적합으로 각 가로 띠의 명암 편차(무늬가 얼마나 많은지)를 빠르게 구한다
+    rows = cur_s.astype(np.float32)
+    c_sum = np.concatenate(([0], np.cumsum(rows.sum(axis=1))))
+    c_sq = np.concatenate(([0], np.cumsum((rows * rows).sum(axis=1))))
+    n = bhs * cur_s.shape[1]
+
+    def sd(y: int) -> float:
+        mean = (c_sum[y + bhs] - c_sum[y]) / n
+        return max(0.0, (c_sq[y + bhs] - c_sq[y]) / n - mean * mean) ** 0.5
+
+    starts = range(0, hs - bhs, max(1, bhs // 2))
+    # 화면을 4등분해 구간마다 템플릿 띠를 하나씩 고르고, 가운데 구간부터 차례로 시도한다.
+    #  - 아래로 스크롤하면 위쪽 내용이, 위로 스크롤하면 아래쪽 내용이 이전 화면에 남아 있다
+    #  - 고른 띠가 새로 드러났거나 새로 뜬 내용이면 맞지 않으므로 다음 구간 띠로 다시 찾는다
+    quarter = lambda y: min(3, (y + bhs // 2) * 4 // hs)  # noqa: E731
+    for q in (1, 2, 0, 3):
+        group = [y for y in starts if quarter(y) == q]
+        if not group:
+            continue
+        ys = max(group, key=sd)
+        if sd(ys) < SCROLL_MIN_STD:  # 빈 여백이면 위치를 못 잡는다
+            continue
+        tpl_s = cur_s[ys:ys + bhs]
+        if cv2.absdiff(tpl_s, ref_s[ys:ys + bhs]).mean() < 1.0:  # 그 자리 그대로인 띠는 판단 불가
+            continue
+        best_y = _match_band(cur, ref, ref_q, tpl_s, ys * 2, bhs * 2)
+        if best_y is not None:
+            dy = ys * 2 - best_y
+            return dy if 0 < abs(dy) < 0.8 * h else 0
+    return 0
+
+
+def _match_band(cur, ref, ref_q, tpl_s, y0: int, bh: int) -> int | None:
+    """cur[y0:y0+bh] 띠가 ref의 어느 y에 있는지. 충분히 맞는 곳이 없으면 None.
+    1) 1/4 해상도에서 후보 위치 몇 개 → 2) 원래 해상도에서 후보마다 ±8px 정밀 비교
+    (글자 줄이 비슷하게 반복되는 화면은 1/4 해상도에서 엉뚱한 줄과 헷갈릴 수 있어 후보를 여럿 본다)"""
+    h = cur.shape[0]
+    tpl_q = _half(tpl_s)[:, :ref_q.shape[1]]
+    coarse = cv2.matchTemplate(ref_q, tpl_q, cv2.TM_SQDIFF_NORMED)[:, 0]
+    cands: list[int] = []
+    for c in np.argsort(coarse):
+        if all(abs(int(c) - p) > 3 for p in cands):
+            cands.append(int(c))
+            if len(cands) == SCROLL_CANDIDATES:
+                break
+    tpl = cur[y0:y0 + bh]
+    t_sq = cv2.norm(tpl, cv2.NORM_L2SQR) or 1.0
+    best_err, best_y = 1.0, None
+    seen: set[int] = set()
+    for c in cands:
+        for y in range(max(0, c * 4 - 8), min(h - bh, c * 4 + 8) + 1):
+            if y in seen:
+                continue
+            seen.add(y)
+            a = ref[y:y + bh]
+            # TM_SQDIFF_NORMED와 같은 값. 위치 수가 적어 matchTemplate보다 직접 계산이 훨씬 빠르다
+            err = cv2.norm(a, tpl, cv2.NORM_L2SQR) / ((cv2.norm(a, cv2.NORM_L2SQR) or 1.0) * t_sq) ** 0.5
+            if err < best_err:
+                best_err, best_y = err, y
+    return best_y if best_err <= SCROLL_MAX_ERR else None
+
+
+def shift_rows(a: np.ndarray, dy: int, fill: np.ndarray | None = None) -> np.ndarray:
+    """a를 세로로 dy만큼 민다. 새로 드러난 줄은 fill(같은 크기)에서, 없으면 0으로 채운다."""
+    out = fill.copy() if fill is not None else np.zeros_like(a)
+    if dy > 0:
+        out[dy:] = a[:-dy]
+    elif dy < 0:
+        out[:dy] = a[-dy:]
+    return out
+
+
+def exposed_rows(dy: int, h: int) -> tuple[int, int]:
+    """dy만큼 스크롤했을 때 새로 드러난 줄 범위 [y0, y1)."""
+    return (0, min(h, dy)) if dy > 0 else (max(0, h + dy), h)
+
+
+def shift_hits(hits: list[Hit], dy: int, height: int, grow: int = 2) -> list[Hit]:
+    """PII 박스를 dy만큼 옮긴다. 위치 추정 오차를 감안해 grow만큼 넓히고, 화면 밖은 버린다."""
+    out = []
+    for h in hits:
+        x0, y0, x1, y1 = h.box
+        y0, y1 = y0 + dy - grow, y1 + dy + grow
+        if y1 <= 0 or y0 >= height:
+            continue
+        out.append(Hit(h.kind, (max(0, x0 - grow), max(0, y0), x1 + grow, min(height, y1))))
+    return out
+
+
 def scale_hits(hits: list[Hit], s: float) -> list[Hit]:
     if s == 1:
         return hits
@@ -101,17 +218,35 @@ def mask_frame(frame: np.ndarray, v: Verified) -> tuple[np.ndarray, int]:
         mosaic(frame, 0, 0, w, h)
         return frame, 1
     kh, kw = v.ref_key.shape
+    fh, fw = frame.shape[:2]
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     if gray.shape != (kh, kw):
         gray = cv2.resize(gray, (kw, kh), interpolation=cv2.INTER_AREA)
-    regions = _regions(gray, v.ref_key, frame.shape[1] / kw)  # 마스킹 전 픽셀로 변경 영역 계산
-    full_w = kw / DIFF_SCALE
-    black_boxes(frame, scale_hits(v.hits, frame.shape[1] / full_w))
-    held = v.masked_frame
+
+    ref, hits = v.ref_key, v.hits
+    held = v.masked_frame if v.masked_frame is not None and v.masked_frame.shape == frame.shape else None
+    band = None  # 스크롤로 새로 드러난 띠 (frame 좌표)
+    dy = estimate_scroll(gray, v.ref_key)
+    if dy:
+        # 검증된 기준·박스·검증본을 스크롤만큼 같이 민다 → 화면이 멈추지 않고 따라 움직인다
+        ref = shift_rows(v.ref_key, dy, gray)  # 드러난 줄은 band로 따로 가리므로 비교에서 제외
+        hits = shift_hits(v.hits, round(dy / DIFF_SCALE), round(kh / DIFF_SCALE))
+        dy_f = round(dy * fh / kh)
+        if held is not None:
+            held = shift_rows(held, dy_f)
+        band = exposed_rows(dy_f, fh)
+        band_px = frame[band[0]:band[1]].copy()  # 마스킹 전 원본 (모자이크용)
+
+    regions = _regions(gray, ref, fw / kw)  # 마스킹 전 픽셀로 변경 영역 계산
+    black_boxes(frame, scale_hits(hits, fw / (kw / DIFF_SCALE)))
     for x, y, w, h in regions:
-        if held is not None and held.shape == frame.shape:
+        if held is not None:
             # 검사 중인 영역은 직전 검증본(이미 마스킹됨)으로 덮어 '잠깐 멈춘' 것처럼 보이게
             frame[y:y + h, x:x + w] = held[y:y + h, x:x + w]
         else:
-            mosaic(frame, x, y, w, h)  # 검증본이 없을 때만 예전처럼 모자이크
-    return frame, len(regions)
+            mosaic(frame, x, y, w, h)  # 검증본이 없을 때만 모자이크
+    if band is not None and band[1] > band[0]:
+        # 새로 드러난 띠는 아직 아무도 본 적 없는 내용 → OCR이 확인할 때까지 모자이크 (보통 0.1~0.2초)
+        frame[band[0]:band[1]] = band_px
+        mosaic(frame, 0, band[0], fw, band[1] - band[0])
+    return frame, len(regions) + (1 if band else 0)

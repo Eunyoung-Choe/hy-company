@@ -2,8 +2,8 @@ import Link from 'next/link';
 
 const steps = [
   { n: '1', title: '연속 캡처', who: 'CPU · mss', body: '화면을 60FPS로 캡처해 RAM의 Ring Buffer A에 덮어씁니다. 파일로 저장하지 않습니다.' },
-  { n: '2', title: 'PII 좌표 추출', who: 'GPU · EasyOCR + Regex', body: '주민번호·카드·계좌·CVC/OTP·주소·휴대폰 번호의 좌표(BBOX)만 뽑고, 인식된 텍스트는 바로 버립니다.' },
-  { n: '3', title: '즉시 마스킹', who: 'CPU · OpenCV', body: '좌표에 검은 박스를 덮어 그립니다. 아직 OCR 검증을 받지 않은 변경 영역은 직전 검증 화면으로 잠시 보류합니다(Fail-closed).' },
+  { n: '2', title: 'PII 좌표 추출', who: 'Windows OCR(없으면 EasyOCR) + Regex', body: '주민번호·카드·계좌·CVC/OTP·주소·휴대폰 번호의 좌표(BBOX)만 뽑고, 인식된 텍스트는 바로 버립니다.' },
+  { n: '3', title: '즉시 마스킹', who: 'CPU · OpenCV', body: '좌표에 검은 박스를 덮어 그립니다. 스크롤하면 검증된 화면과 박스를 같이 옮기고, 새로 드러난 영역만 OCR이 확인할 때까지 모자이크로 가립니다(Fail-closed).' },
   { n: '4', title: '송출 · 감사 로그', who: '비동기 스레드', body: '마스킹 완성본만 송출하고, 개인정보가 감지되면 마스킹된 결과물만 Supabase Storage에 올립니다.' },
 ];
 

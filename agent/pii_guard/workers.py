@@ -14,7 +14,8 @@ import numpy as np
 
 from .config import Config
 from .detect import Hit, detect
-from .masker import DIFF_SCALE, Verified, VerifiedState, black_boxes, diff_key, mask_frame
+from .masker import (DIFF_SCALE, Verified, VerifiedState, black_boxes, diff_key, estimate_scroll,
+                     exposed_rows, mask_frame, shift_hits, shift_rows)
 from .ring import RingBuffer
 
 if TYPE_CHECKING:
@@ -328,16 +329,26 @@ def _ocr_main_loop(cfg, ring, state, stats, audit_q, stop, ocr, pending_regions)
         h = frame.shape[0]
         cur_key = diff_key(frame)
 
-        if prev.ref_key is None:
+        base_ref, base_hits = prev.ref_key, prev.hits
+        if base_ref is None:
             strips = [(0, h)]
         else:
-            regions = pending_regions(frame, prev.ref_key)
+            extra = []
+            dy = estimate_scroll(cur_key, base_ref)
+            if dy:
+                # 스크롤: 검증된 기준과 PII 박스를 같이 밀고, 새로 드러난 띠만 OCR (전체 OCR 대신)
+                dy_px = round(dy / DIFF_SCALE)
+                base_ref = shift_rows(base_ref, dy, cur_key)
+                base_hits = shift_hits(base_hits, dy_px, h)
+                e0, e1 = exposed_rows(dy_px, h)
+                extra = [(0, e0, frame.shape[1], e1 - e0)]
+            regions = pending_regions(frame, base_ref) + extra
             if not regions:  # 검증된 상태와 같음 → OCR 생략 (CPU 절약)
                 frame.fill(0)
                 del frame
                 time.sleep(0.03)
                 continue
-            strips = _strips(regions, prev.hits, h)
+            strips = _strips(regions, base_hits, h)
             if sum(b - a for a, b in strips) > FULL_OCR_RATIO * h:
                 strips = [(0, h)]
 
@@ -347,8 +358,8 @@ def _ocr_main_loop(cfg, ring, state, stats, audit_q, stop, ocr, pending_regions)
             ref_key = cur_key
         else:
             # 띠 밖의 기존 결과는 유지, 띠 안은 새로 OCR
-            hits = [x for x in prev.hits if not any(x.box[1] < b and x.box[3] > a for a, b in strips)]
-            ref_key = prev.ref_key.copy()  # 띠 밖은 옛 기준 유지 (서서히 바뀌는 화면도 결국 감지)
+            hits = [x for x in base_hits if not any(x.box[1] < b and x.box[3] > a for a, b in strips)]
+            ref_key = base_ref.copy()  # 띠 밖은 옛 기준 유지 (서서히 바뀌는 화면도 결국 감지)
             hits += ocr.run([(frame[a:b], a) for a, b in strips])
             for a, b in strips:
                 ka, kb = int(a * DIFF_SCALE), int(b * DIFF_SCALE)
