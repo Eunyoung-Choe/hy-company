@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { piiLabel } from '@/lib/pii';
-import { openDemoWindow } from '@/lib/piiWindows';
 
 const AGENT = (process.env.NEXT_PUBLIC_AGENT_URL || 'http://127.0.0.1:8765').replace(/\/$/, '');
 
@@ -72,12 +71,6 @@ export default function Viewer() {
   const [recBusy, setRecBusy] = useState(false);
   const [recError, setRecError] = useState<string | null>(null);
   const [recNote, setRecNote] = useState<string | null>(null);
-  // 첫 화면 바로가기에서 팝업이 막혀 데모 창을 못 연 경우 (?demo=blocked)
-  const [demoBlocked, setDemoBlocked] = useState(false);
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('demo') === 'blocked') setDemoBlocked(true);
-  }, []);
-  const openDemo = () => setDemoBlocked(!openDemoWindow());
 
   // 토스트: 화면 아래쪽에 잠깐 떴다가 사라지는 알림
   const [toast, setToast] = useState<{ text: string; kind: 'info' | 'rec' | 'ok' | 'error'; id: number } | null>(null);
@@ -88,6 +81,13 @@ export default function Viewer() {
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   };
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+  // 첫 화면 바로가기에서 팝업이 막혀 데모 창을 못 연 경우 (?demo=blocked) 알림으로 안내
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('demo') === 'blocked') {
+      showToast('팝업이 차단돼 데모 창을 열지 못했어요. 주소창의 팝업 차단을 허용해 주세요', 'error');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const save = async (name: string) => {
     try {
@@ -194,137 +194,131 @@ export default function Viewer() {
 
   return (
     <div className="viewer">
-      {toast && (
-        <div key={toast.id} className={`toast ${toast.kind}`} role="status" aria-live="polite">
-          {toast.text}
-        </div>
-      )}
-      <div className="screen">
-        {online && !sharing ? (
-          <div className="screen-empty">
-            <strong>원격이 꺼져 있습니다</strong>
-            <span>화면 캡처와 송출이 멈춘 상태입니다.</span>
-          </div>
-        ) : online ? (
-          // MJPEG 스트림은 next/image 최적화 대상이 아니므로 img 사용
-          // eslint-disable-next-line @next/next/no-img-element
-          <img key={streamKey} src={`${AGENT}/stream.mjpg?k=${streamKey}`} alt="마스킹된 원격 화면" />
-        ) : (
-          <div className="screen-empty">
-            {online === null ? '에이전트 연결 중…' : (
-              <>
-                <strong>에이전트에 연결할 수 없습니다</strong>
-                <span>{AGENT} 에서 마스킹 에이전트를 실행해 주세요.</span>
-              </>
-            )}
-          </div>
-        )}
-        {online && recording && <span className="rec-badge">● REC {mmss(status?.recording_sec ?? 0)}</span>}
-        {online && sharing && (masking ? (
-          <span className={`badge ${verifying ? 'warn' : 'ok'}`}>
-            {verifying ? '화면 갱신 중 (검증 대기)' : '검증 완료'}
-          </span>
-        ) : (
-          <span className="badge danger">⚠ 마스킹 꺼짐 · 원본 송출 중</span>
-        ))}
-      </div>
 
-      <aside className="panel">
-        <div className="demo-open">
-          <button type="button" onClick={openDemo}>🗔 데모 창 열기 (왼쪽 절반)</button>
-          {demoBlocked && (
-            <p className="toggle-error">
-              팝업이 차단돼 데모 창을 열지 못했어요. 주소창 오른쪽의 팝업 차단 아이콘에서 허용하거나 위 버튼을 눌러 주세요.
-            </p>
-          )}
-        </div>
-
-        <div className="remote-toggle">
-          <span className={`dot ${online && sharing ? 'on' : 'off'}`} />
-          <strong>원격 {online ? (sharing ? 'ON' : 'OFF') : '연결 안 됨'}</strong>
-          <button
-            type="button"
-            className={sharing ? 'btn-off' : 'btn-on'}
-            disabled={!online || busy}
-            onClick={() => setSharing(!sharing)}
-          >
-            {busy ? '전환 중…' : sharing ? '원격 끄기' : '원격 켜기'}
-          </button>
-        </div>
-        <div className="remote-toggle">
-          <span className={`dot ${online && masking ? 'on' : 'off'}`} />
-          <strong>마스킹 {online ? (masking ? 'ON' : 'OFF') : '-'}</strong>
-          <button
-            type="button"
-            className={masking ? 'btn-off' : 'btn-on'}
-            disabled={!online || busy}
-            onClick={() => setMasking(!masking)}
-          >
-            {busy ? '전환 중…' : masking ? '마스킹 끄기' : '마스킹 켜기'}
-          </button>
-        </div>
-        {toggleError && <p className="toggle-error">{toggleError}</p>}
-
-        <div className="record">
-          <button
-            type="button"
-            className={recording ? 'btn-rec-stop' : 'btn-rec'}
-            disabled={!online || recBusy}
-            onClick={() => setRecording(!recording)}
-          >
-            {recBusy
-              ? recording ? '저장 중…' : '시작 중…'
-              : recording ? `■ 녹화 종료 (${mmss(status?.recording_sec ?? 0)})` : '● 녹화 시작'}
-          </button>
-          {!recording && status?.last_recording && (
-            <button type="button" className="btn-rec-save" onClick={() => save(status.last_recording!)}>
-              💾 다른 이름으로 저장 ({status.last_recording})
-            </button>
-          )}
-          <small className="muted">마스킹된 화면만 MP4로 녹화됩니다. 종료하면 저장 창이 열립니다.</small>
-          {recNote && <small className="rec-note">{recNote}</small>}
-          {recError && <p className="toggle-error">{recError}</p>}
-        </div>
-
-        <h3>처리 상태</h3>
-        <dl className="metrics">
-          <dt>캡처</dt><dd>{status ? `${status.capture_fps} FPS` : '-'}</dd>
-          <dt>송출</dt><dd>{status ? `${status.output_fps} FPS` : '-'}</dd>
-          <dt>OCR 검증</dt><dd>{status ? `${status.ocr_fps} 회/초 · ${status.ocr_latency_ms}ms` : '-'}</dd>
-          <dt>마스킹 박스</dt><dd>{status?.masked_boxes ?? '-'}</dd>
-          <dt>검증 대기 영역</dt><dd>{status ? (status.ocr_ready ? status.pending_regions : '전체') : '-'}</dd>
-        </dl>
-
-        <h3>최근 감지</h3>
-        {status?.last_kinds.length ? (
-          <>
-            <div className="chips">
-              {status.last_kinds.map((k) => <span key={k} className="chip">{piiLabel(k)}</span>)}
+      <section className="win viewer-screen">
+        <div className="win-title">📺 수리기사 화면 <small>· 마스킹 결과</small></div>
+        <div className="screen">
+          {online && !sharing ? (
+            <div className="screen-empty">
+              <strong>원격이 꺼져 있습니다</strong>
+              <span>화면 캡처와 송출이 멈춘 상태입니다.</span>
             </div>
-            {status.last_detect_at && (
-              <small className="muted">{new Date(status.last_detect_at * 1000).toLocaleTimeString('ko-KR')}</small>
+          ) : online ? (
+            // MJPEG 스트림은 next/image 최적화 대상이 아니므로 img 사용
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={streamKey} src={`${AGENT}/stream.mjpg?k=${streamKey}`} alt="마스킹된 원격 화면" />
+          ) : (
+            <div className="screen-empty">
+              {online === null ? '에이전트 연결 중…' : (
+                <>
+                  <strong>에이전트에 연결할 수 없습니다</strong>
+                  <span>{AGENT} 에서 마스킹 에이전트를 실행해 주세요.</span>
+                </>
+              )}
+            </div>
+          )}
+          {online && recording && <span className="rec-badge">● REC {mmss(status?.recording_sec ?? 0)}</span>}
+          {online && sharing && (masking ? (
+            <span className={`badge ${verifying ? 'warn' : 'ok'}`}>
+              {verifying ? '화면 갱신 중 (검증 대기)' : '✔ 검증 완료'}
+            </span>
+          ) : (
+            <span className="badge danger">⚠ 마스킹 꺼짐 · 원본 송출 중</span>
+          ))}
+        </div>
+      </section>
+
+      <div className="panel-col">
+        {/* 토스트: 조작 패널 바로 위 가운데 (녹화 시작·종료·저장, 팝업 차단 알림) */}
+        <div className="panel-toast">
+          {toast && (
+            <div key={toast.id} className={`toast ${toast.kind}`} role="status" aria-live="polite">
+              {toast.text}
+            </div>
+          )}
+        </div>
+      <aside className="win viewer-panel">
+        <div className="win-title">🔧 조작 패널</div>
+        <div className="win-body">
+          <div className="ctl">
+            <span className={`dot ${online && sharing ? 'on' : 'off'}`} />
+            <strong>원격 {online ? (sharing ? 'ON' : 'OFF') : '연결 안 됨'}</strong>
+            <button
+              type="button"
+              className={`btn small ${sharing ? 'danger' : 'go'}`}
+              disabled={!online || busy}
+              onClick={() => setSharing(!sharing)}
+            >
+              {busy ? '전환 중…' : sharing ? '원격 끄기' : '원격 켜기'}
+            </button>
+          </div>
+          <div className="ctl">
+            <span className={`dot ${online && masking ? 'on' : 'off'}`} />
+            <strong>마스킹 {online ? (masking ? 'ON' : 'OFF') : '-'}</strong>
+            <button
+              type="button"
+              className={`btn small ${masking ? 'danger' : 'go'}`}
+              disabled={!online || busy}
+              onClick={() => setMasking(!masking)}
+            >
+              {busy ? '전환 중…' : masking ? '마스킹 끄기' : '마스킹 켜기'}
+            </button>
+          </div>
+          {toggleError && <p className="pii-error">{toggleError}</p>}
+
+          <div className="ctl-block">
+            <button
+              type="button"
+              className={`btn block ${recording ? 'danger' : ''}`}
+              disabled={!online || recBusy}
+              onClick={() => setRecording(!recording)}
+            >
+              {recBusy
+                ? recording ? '저장 중…' : '시작 중…'
+                : recording ? `■ 녹화 종료 (${mmss(status?.recording_sec ?? 0)})` : <><span className="rec-dot">●</span> 녹화 시작</>}
+            </button>
+            {!recording && status?.last_recording && (
+              <button type="button" className="btn small block" onClick={() => save(status.last_recording!)}>
+                💾 다른 이름으로 저장
+              </button>
             )}
-          </>
-        ) : (
-          <p className="muted">아직 없음</p>
-        )}
+            <small className="pii-note">마스킹된 화면만 MP4로 녹화됩니다. 종료하면 저장 창이 열립니다.</small>
+            {recNote && <small className="rec-note">{recNote}</small>}
+            {recError && <p className="pii-error">{recError}</p>}
+          </div>
 
-        <h3>감사 로그</h3>
-        <p className="muted">
-          {status
-            ? status.audit_enabled
-              ? `업로드 ${status.audit_uploaded}건 · 실패 ${status.audit_failed}건`
-              : 'Supabase 미설정 (업로드 꺼짐)'
-            : '-'}
-        </p>
+          <h3 className="pii-sub">처리 상태</h3>
+          <dl className="metrics">
+            <dt>캡처</dt><dd>{status ? `${status.capture_fps} FPS` : '-'}</dd>
+            <dt>송출</dt><dd>{status ? `${status.output_fps} FPS` : '-'}</dd>
+            <dt>OCR 검증</dt><dd>{status ? `${status.ocr_fps} 회/초 · ${status.ocr_latency_ms}ms` : '-'}</dd>
+            <dt>마스킹 박스</dt><dd>{status?.masked_boxes ?? '-'}</dd>
+            <dt>검증 대기 영역</dt><dd>{status ? (status.ocr_ready ? status.pending_regions : '전체') : '-'}</dd>
+          </dl>
 
-        <h3>표시 규칙</h3>
-        <ul className="legend">
-          <li><span className="sw black" /> 검은 박스: 감지된 개인정보</li>
-          <li><span className="sw mosaic" /> 모자이크: 새로 나타나 아직 검증 전인 영역 (보통 0.1~0.5초)</li>
-          <li>검증 중인 영역은 직전 검증 화면을 스크롤에 맞춰 옮겨 보여줍니다</li>
-        </ul>
+          <h3 className="pii-sub">최근 감지</h3>
+          {status?.last_kinds.length ? (
+            <>
+              <div className="chips">
+                {status.last_kinds.map((k) => <span key={k} className="chip">{piiLabel(k)}</span>)}
+              </div>
+              {status.last_detect_at && (
+                <small className="muted">{new Date(status.last_detect_at * 1000).toLocaleTimeString('ko-KR')}</small>
+              )}
+            </>
+          ) : (
+            <p className="muted">아직 없음</p>
+          )}
+
+          <h3 className="pii-sub">표시 규칙</h3>
+          <ul className="legend">
+            <li><span className="sw black" /> 검은 박스: 감지된 개인정보</li>
+            <li><span className="sw mosaic" /> 모자이크: 새로 나타나 아직 검증 전인 영역 (보통 0.1~0.5초)</li>
+            <li>검증 중인 영역은 직전 검증 화면을 스크롤에 맞춰 옮겨 보여줍니다</li>
+          </ul>
+        </div>
       </aside>
+      </div>
     </div>
   );
 }

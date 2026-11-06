@@ -82,7 +82,8 @@ PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("ACCOUNT", re.compile(r"(?<!\d)\d{2,6}-\d{2,6}-\d{2,7}(?:-\d{1,3})?(?!\d)")),
 
     # [줄바꿈 대응] 줄 끝에 잘린 계좌번호 (예: "110-") 또는 줄 시작의 계좌 나머지 (예: "123-456789")
-    ("ACCOUNT_PART", re.compile(r"(?<!\d)\d{2,6}-(?:$|\s)")),
+    # (줄 끝 조각은 앞 묶음까지 통째로: "110-123-")
+    ("ACCOUNT_PART", re.compile(r"(?<!\d)\d{2,6}(?:-\d{1,7})*-(?:$|\s)")),
     ("ACCOUNT_PART", re.compile(r"(?:^|\s)\d{2,6}-\d{2,7}(?:-\d{1,3})?(?!\d)")),
 
     # CVC / CVV / OTP / 보안코드
@@ -298,11 +299,21 @@ def detect_words(ocr_lines: list[list[tuple[str, Box]]], pad: int = 1) -> list[H
     hits: list[Hit] = []
     ocr_lines = _merge_rows([w for w in ocr_lines if w])
     lines: list[tuple[Box, str]] = [(_union([wb for _, wb in w]), " ".join(wt for wt, _ in w)) for w in ocr_lines]
-    for words, (_, text) in zip(ocr_lines, lines):
+    wrapped = _wrap_continuations(lines)
+    for idx, (words, (_, text)) in enumerate(zip(ocr_lines, lines)):
         ranges, pos = [], 0
         for wt, wb in words:
             ranges.append((pos, pos + len(wt), wt, wb))
             pos += len(wt) + 1
+        if idx in wrapped:
+            # 윗줄이 '110-123-'처럼 하이픈으로 끝남 → 이 줄 맨 앞 숫자는 줄바꿈된 계좌번호의 나머지
+            m = _WRAP_HEAD.match(normalize(text))
+            if m:
+                s, e = m.span(1)
+                parts = [sub_box(_corners(wb), wt, max(s, a) - a, min(e, b) - a, pad=pad)
+                         for a, b, wt, wb in ranges if a < e and s < b]
+                if parts:
+                    hits.append(Hit("ACCOUNT_PART", _union(parts)))
         for kind, s, e in find_spans(text):
             if kind == "ADDRESS":
                 # 앞쪽 보강: OCR이 시·도 이름을 깨뜨리면('혁百특풀시', '인 전광역시') 매칭이 단어 중간이나
@@ -330,6 +341,25 @@ def detect_words(ocr_lines: list[list[tuple[str, Box]]], pad: int = 1) -> list[H
                     box = _row_extend(box, lines, _region_piece, pad, side="left")
             hits.append(Hit(kind, box))
     return hits + _label_hits(lines, pad)
+
+
+_WRAP_END = re.compile(r"\d{2,6}(?:-\d{1,7})*-\s*$")
+_WRAP_HEAD = re.compile(r"\s*(\d{2,8}(?:-\d{1,8})*)")
+
+
+def _wrap_continuations(lines: list[tuple[Box, str]]) -> set[int]:
+    """하이픈으로 끝나는 줄('…신한은행 110-123-') 바로 아래에서 시작하는 줄 번호들.
+    글꼴·창 너비에 따라 계좌번호가 두 줄로 나뉘면 아랫줄 숫자에는 하이픈이 없어 패턴만으로는 못 찾는다."""
+    out: set[int] = set()
+    for i, (b, t) in enumerate(lines):
+        if not _WRAP_END.search(normalize(t)):
+            continue
+        h = max(1, b[3] - b[1])
+        below = [j for j, (c, _) in enumerate(lines)
+                 if j != i and b[3] - 0.3 * h <= c[1] <= b[3] + 1.2 * h and c[0] < b[2]]
+        if below:
+            out.add(min(below, key=lambda j: (lines[j][0][1], lines[j][0][0])))
+    return out
 
 
 def _merge_rows(ocr_lines: list[list[tuple[str, Box]]]) -> list[list[tuple[str, Box]]]:

@@ -1,134 +1,125 @@
-/* PII Guard 전용 스타일. 모든 선택자를 .pii 아래로 한정해 다른 서비스(VideoDigest) 화면에 영향 없음 */
-.pii { min-height: 100vh; }
-.pii p { margin: 1em 0; }  /* 루트 globals.css의 p { margin: 0 } 되돌림 */
-.pii {
-  --bg: #f6f7f9;
-  --fg: #1b1f24;
-  --muted: #6b7280;
-  --line: #e3e6ea;
-  --card: #fff;
-  --accent: #2557d6;
-  --ok: #157f3b;
-  --warn: #b45309;
-}
+/* PII Guard 전용 스타일 — 첫 화면(VideoDigest, globals.css)의 레트로 디자인을 그대로 따른다.
+   색·테두리는 globals.css의 토큰(--green, --edge-dark …), 버튼은 공용 .btn, 창은 공용 .win을 쓴다.
+   모든 선택자를 .pii 아래로 한정해 다른 서비스 화면에는 영향이 없다. */
 
-.pii * { box-sizing: border-box; }
-.pii { margin: 0; font-family: system-ui, 'Malgun Gothic', sans-serif; background: var(--bg); color: var(--fg); line-height: 1.55; }
-.pii a { color: var(--accent); }
-.pii code { background: #eef0f3; padding: 1px 5px; border-radius: 4px; font-size: .92em; }
-.pii h1 { margin: 0 0 6px; font-size: 26px; }
-.pii h2 { margin: 36px 0 12px; font-size: 19px; }
-.pii h3 { margin: 0 0 10px; font-size: 15px; }
+.pii { min-height: 100vh; background: var(--bg); }
+.pii .desk.wide { max-width: 1320px; }
+.pii .desk.narrow { max-width: 780px; }
 .pii .muted { color: var(--muted); }
-.pii .lead { margin: 0 0 24px; color: var(--muted); }
+.pii code { background: var(--green-light); border: 1px solid var(--track); padding: 0 5px; font-size: .92em; }
 
-.pii .topbar { display: flex; align-items: center; gap: 28px; padding: 12px 28px; background: #111827; }
-.pii .topbar a { color: #e5e7eb; text-decoration: none; font-size: 14px; }
-.pii .topbar a:hover { color: #fff; }
-.pii .topbar .brand { font-weight: 700; font-size: 16px; color: #fff; }
-.pii .topbar nav { display: flex; gap: 20px; }
+/* 머리말: 첫 화면(.masthead)과 같은 구조. 위 설명 줄 + (설명 · 토스트 · 이전 버튼) 줄 */
+.pii .pii-lead { margin-top: 6px; color: var(--ink-2); }
+.pii .pii-lead + .pii-lead { margin-top: 2px; }
+.pii .pii-head-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+/* 토스트는 조작 패널 바로 위 가운데에 겹쳐 띄운다 (떠도 창들이 밀리지 않게) */
+.pii .panel-col { position: relative; }
+.pii .panel-toast { position: absolute; left: 0; right: 0; top: 12px; transform: translateY(-100%); z-index: 20; display: flex; justify-content: center; pointer-events: none; }
+.pii .panel-toast .toast { white-space: normal; max-width: 100%; text-align: center; }
 
-.pii .page { max-width: 1040px; margin: 0 auto; padding: 32px 24px 60px; }
-.pii .page.wide { max-width: 1400px; }
-.pii .page.narrow { max-width: 760px; }
-.pii .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+/* 공용 버튼(.btn) 변형: 켜기 = 초록 글씨, 끄기 = .btn.danger(빨간 글씨), 가로 꽉 채움 = .block */
+.pii .btn.go { color: var(--green); }
+.pii .btn.go:not(:disabled):hover { color: var(--green-dark); }
+.pii .btn.block { width: 100%; }
+.pii .btn .rec-dot { color: var(--danger); }
 
-.pii .flow { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-.pii .flow p { margin: 8px 0 0; font-size: 14px; }
-.pii .flow small { color: var(--muted); }
-.pii .step-n { font-size: 12px; font-weight: 700; color: var(--accent); }
-.pii .howto li { margin-bottom: 6px; }
+.pii .pii-error { margin: 8px 0 0; padding: 6px 10px; font-size: 12px; border: 2px solid var(--danger); color: var(--danger); background: #fff5f5; }
+.pii .pii-note { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.pii .pii-sub { margin: 18px 0 8px; font-size: 13px; color: var(--green-dark); padding-bottom: 4px; border-bottom: 1px dotted var(--edge-lo); }
 
-/* 데모 자료: OCR이 잘 읽도록 큰 글씨, 높은 대비 */
-.pii .hint { font-size: 14px; color: var(--muted); }
-.pii .demo { display: grid; gap: 14px; }
-.pii .demo-bar { display: flex; justify-content: space-between; align-items: center; }
-.pii .demo-bar button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
-.pii .doc { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; font-size: 18px; }
-.pii .doc h3 { font-size: 14px; color: var(--muted); font-weight: 600; }
-.pii .doc p { margin: 0; }
-.pii .field { display: grid; grid-template-columns: 140px 1fr; padding: 7px 0; border-top: 1px solid #f0f1f3; }
-.pii .field:first-of-type { border-top: 0; }
-.pii .field-label { color: #4b5563; }
-.pii .field-value { font-weight: 600; letter-spacing: .02em; }
-.pii .otp p { font-size: 26px; font-weight: 700; letter-spacing: .08em; }
+/* ───────── PII Guard 홈 ───────── */
+.pii .pii-flow { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.pii .pii-flow li { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid var(--edge-lo); background: #fbfdfb; }
+.pii .pii-flow .n { align-self: flex-start; font-size: 12px; font-weight: bold; color: #fff; background: var(--green); border: 1px solid var(--green-dark); padding: 0 6px; }
+.pii .pii-flow b { font-size: 15px; }
+.pii .pii-flow small { color: var(--muted); }
+.pii .pii-flow p { color: var(--ink-2); font-size: 13px; margin-top: 4px; }
+.pii .howto { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.pii .howto-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 
-/* 원격 화면 */
-.pii .viewer { display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
-.pii .screen { position: relative; background: #0b0f14; border-radius: 10px; overflow: hidden; min-height: 360px; display: grid; place-items: center; }
+/* ───────── 데모 자료 (OCR이 잘 읽도록 큰 글씨·높은 대비 유지) ───────── */
+.pii .demo-bar { display: flex; justify-content: flex-end; }
+.pii .doc .win-body { padding: 8px 18px 12px; font-size: 18px; }
+.pii .field { display: grid; grid-template-columns: 150px 1fr; padding: 8px 0; border-top: 1px dotted var(--edge-lo); }
+.pii .field:first-child { border-top: 0; }
+.pii .field-label { color: var(--ink-2); }
+.pii .field-value { font-weight: bold; letter-spacing: .02em; }
+.pii .doc-text { padding: 6px 0; }
+.pii .otp-value { font-size: 26px; font-weight: bold; letter-spacing: .08em; padding: 6px 0; }
+
+/* ───────── 원격 화면 ───────── */
+.pii .viewer { display: grid; grid-template-columns: 1fr 300px; gap: 0 22px; align-items: start; }
+.pii .viewer-panel .win-body { padding: 14px; }
+.pii .win-title small { font-weight: normal; opacity: .85; }
+.pii .screen { position: relative; background: #0b0f14; min-height: 360px; display: grid; place-items: center; }
 .pii .screen img { display: block; width: 100%; height: auto; }
-.pii .screen-empty { color: #cbd5e1; display: grid; gap: 6px; text-align: center; padding: 40px; }
-.pii .badge { position: absolute; top: 10px; left: 10px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; color: #fff; }
-.pii .badge.ok { background: var(--ok); }
-.pii .badge.warn { background: var(--warn); }
-.pii .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
-.pii .panel h3 { margin-top: 18px; }
-.pii .panel h3:first-child { margin-top: 0; }
-.pii .metrics { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
-.pii .metrics dt { color: var(--muted); }
+.pii .screen-empty { color: #d9ecdf; display: grid; gap: 6px; text-align: center; padding: 40px; }
+
+/* 화면 위 표시: 첫 화면의 .stamp(도장)와 같은 네모 표식 */
+.pii .badge {
+  position: absolute; top: 10px; left: 10px; padding: 2px 8px; font-size: 12px; font-weight: bold;
+  background: var(--bg); border: 2px solid var(--edge-dark); box-shadow: 2px 2px 0 var(--edge-lo);
+}
+.pii .badge.ok { color: var(--green-dark); }
+.pii .badge.warn { color: #9a5b00; }
+.pii .badge.danger { color: #fff; background: var(--danger); }
+.pii .rec-badge {
+  position: absolute; top: 10px; right: 10px; padding: 2px 8px; font-size: 12px; font-weight: bold;
+  color: #fff; background: var(--danger); border: 2px solid var(--edge-dark);
+  animation: pii-rec-blink 1.2s steps(2) infinite;
+}
+@keyframes pii-rec-blink { 50% { opacity: .55; } }
+
+/* 조작 패널 */
+.pii .ctl { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px dotted var(--edge-lo); }
+.pii .ctl:first-child { padding-top: 0; }
+.pii .ctl strong { flex: 1; }
+.pii .dot { width: 10px; height: 10px; border: 1px solid var(--edge-dark); }
+.pii .dot.on { background: var(--green); }
+.pii .dot.off { background: #c9d3cc; }
+.pii .ctl-block { display: grid; gap: 6px; padding: 12px 0 2px; }
+.pii .ctl-block .pii-note { margin-top: 0; }
+.pii .rec-note { font-size: 12px; color: var(--green-dark); font-weight: bold; }
+.pii .metrics { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
+.pii .metrics dt { color: var(--ink-2); }
 .pii .metrics dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-.pii .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
-.pii .chip { font-size: 12px; padding: 2px 9px; border-radius: 99px; background: #eef2ff; color: #3730a3; }
-.pii .legend { list-style: none; padding: 0; margin: 0; font-size: 13px; display: grid; gap: 6px; }
-.pii .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+.pii .chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 2px 0 4px; }
+.pii .chip { font-size: 12px; padding: 1px 7px; background: var(--green-light); border: 1px solid var(--edge-lo); color: var(--green-dark); font-weight: bold; }
+.pii .legend { list-style: none; padding: 0; margin: 0; font-size: 12px; display: grid; gap: 6px; color: var(--ink-2); }
+.pii .sw { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin-right: 6px; border: 1px solid var(--edge-dark); }
 .pii .sw.black { background: #000; }
 .pii .sw.mosaic { background: repeating-conic-gradient(#9ca3af 0 25%, #d1d5db 0 50%) 0 0 / 7px 7px; }
 
-/* 감사 로그 */
-.pii .notice p { margin: 6px 0 0; }
-.pii .notice.error { border-color: #fca5a5; color: #991b1b; }
-.pii .audit-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
-.pii .audit-item { padding: 10px; }
-.pii .audit-item img { width: 100%; border-radius: 6px; display: block; background: #0b0f14; }
-.pii .img-missing { aspect-ratio: 16 / 9; display: grid; place-items: center; background: #f3f4f6; color: var(--muted); border-radius: 6px; }
+/* 토스트: 이전 버튼 옆에 잠깐 뜨는 작은 레트로 창 */
+.pii .toast {
+  white-space: nowrap; padding: 5px 12px; font-size: 13px; font-weight: bold;
+  background: var(--bg); color: var(--ink);
+  border: 2px solid var(--edge-dark); box-shadow: 3px 3px 0 var(--green-light), 3px 3px 0 2px var(--edge-lo);
+  pointer-events: none; animation: pii-toast 3s steps(12) forwards;
+}
+.pii .toast.rec { color: var(--danger); }
+.pii .toast.ok { color: var(--green-dark); }
+.pii .toast.error { color: #fff; background: var(--danger); }
+@keyframes pii-toast {
+  0% { opacity: 0; transform: translateY(6px); }
+  8%, 85% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .pii .toast, .pii .rec-badge { animation: none; } }
+
+/* ───────── 감사 로그 ───────── */
+.pii .audit-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.pii .audit-item { border: 1px solid var(--edge-lo); background: var(--bg); }
+.pii .audit-item img { width: 100%; display: block; background: #0b0f14; border-bottom: 1px solid var(--edge-lo); }
+.pii .audit-meta { padding: 10px 12px; }
+.pii .img-missing { aspect-ratio: 16 / 9; display: grid; place-items: center; background: #f3f6f3; color: var(--muted); border-bottom: 1px solid var(--edge-lo); }
+.pii .notice { color: var(--ink-2); }
+.pii .notice p { margin-top: 6px; }
 
 @media (max-width: 900px) {
   .pii .viewer { grid-template-columns: 1fr; }
+  .pii .pii-flow { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* 원격 on/off */
-.pii .remote-toggle { display: flex; align-items: center; gap: 8px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
-.pii .remote-toggle strong { flex: 1; font-size: 15px; }
-.pii .remote-toggle button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 0; color: #fff; cursor: pointer; }
-.pii .remote-toggle button:disabled { opacity: .5; cursor: default; }
-.pii .btn-off { background: #b91c1c; }
-.pii .btn-on { background: var(--ok); }
-.pii .dot { width: 10px; height: 10px; border-radius: 50%; }
-.pii .dot.on { background: #22c55e; box-shadow: 0 0 0 3px #dcfce7; }
-.pii .dot.off { background: #9ca3af; }
-.pii .toggle-error { margin: -6px 0 12px; font-size: 12px; color: #b91c1c; }
-
-/* 녹화 */
-.pii .rec-badge { position: absolute; top: 10px; right: 10px; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 99px; color: #fff; background: #dc2626; animation: pii-rec-blink 1.2s ease-in-out infinite; }
-@keyframes pii-rec-blink { 50% { opacity: .55; } }
-.pii .record { display: grid; gap: 6px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
-.pii .record button { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 12px; border-radius: 8px; border: 0; color: #fff; cursor: pointer; }
-.pii .record button:disabled { opacity: .5; cursor: default; }
-.pii .btn-rec { background: #dc2626; }
-.pii .btn-rec-stop { background: #1f2937; }
-.pii .record .btn-rec-save { background: #fff; color: var(--text, #111827); border: 1px solid var(--line); font-weight: 500; word-break: break-all; }
-.pii .rec-note { font-size: 12px; color: var(--ok); }
-.pii .record .toggle-error { margin: 0; }
-
-/* 마스킹 꺼짐 경고 */
-.pii .badge.danger { background: #dc2626; }
-
-/* 데모 창 열기 */
-.pii .demo-open { display: grid; gap: 6px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
-.pii .demo-open button { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
-.pii .demo-open .toggle-error { margin: 0; }
-
-/* 토스트 알림 */
-.pii .toast { position: fixed; left: 50%; bottom: 32px; z-index: 100; transform: translateX(-50%);
-  padding: 12px 20px; border-radius: 10px; color: #fff; font-size: 14px; font-weight: 600;
-  background: #1f2937; box-shadow: 0 8px 24px rgba(0,0,0,.22); pointer-events: none;
-  animation: pii-toast 3s ease forwards; }
-.pii .toast.rec { background: #dc2626; }   /* 녹화 시작 = 빨간 REC 느낌 */
-.pii .toast.ok { background: #15803d; }
-.pii .toast.error { background: #7f1d1d; }
-@keyframes pii-toast {
-  0% { opacity: 0; transform: translate(-50%, 12px); }
-  8%, 85% { opacity: 1; transform: translate(-50%, 0); }
-  100% { opacity: 0; transform: translate(-50%, 6px); }
-}
-@media (prefers-reduced-motion: reduce) { .pii .toast { animation: none; } }
+/* 링크로 만든 버튼(<a class="btn">)도 버튼과 똑같이 */
+.pii a.btn { display: inline-block; text-decoration: none; }
