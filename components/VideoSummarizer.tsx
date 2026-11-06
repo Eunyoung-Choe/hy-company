@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import { getHealth, getJob, uploadVideo, type Health, type Job, type JobResult } from '@/lib/api';
 
@@ -83,7 +84,9 @@ export default function VideoSummarizer() {
   return (
     <main className="desk">
       <header className="masthead">
-        <h1>Video<span>Digest</span>.exe</h1>
+        <h1 className="logo">
+          <Image src="/videodigest-logo.png" alt="VideoDigest" width={90} height={90} priority />
+        </h1>
         <p>영상을 통째로 LLM에 넣지 않고, 핵심 장면의 텍스트만으로 요약해 토큰을 아낍니다.</p>
       </header>
 
