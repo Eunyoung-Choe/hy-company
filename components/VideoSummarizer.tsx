@@ -3,6 +3,11 @@
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import { getHealth, getJob, uploadVideo, type Health, type Job, type JobResult } from '@/lib/api';
+import { saveDigest } from '@/lib/digests';
+import Archive from './Archive';
+
+type Tab = 'upload' | 'archive';
+type SaveState = { status: 'idle' | 'saving' | 'saved' | 'error'; message?: string };
 
 const STEPS = ['OpenCV 필터링', 'DINO 분석', '캡션 생성', '최종 요약'] as const;
 const nf = new Intl.NumberFormat('ko-KR');
@@ -19,6 +24,9 @@ export default function VideoSummarizer() {
   const [error, setError] = useState('');
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState('');
+  const [tab, setTab] = useState<Tab>('upload');
+  const [save, setSave] = useState<SaveState>({ status: 'idle' });
+  const [archiveVersion, setArchiveVersion] = useState(0);   // 저장되면 보관함 목록 새로고침
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -43,12 +51,25 @@ export default function VideoSummarizer() {
     setPhase('error');
   }
 
+  async function autoSave(title: string, r: JobResult) {
+    setSave({ status: 'saving' });
+    try {
+      await saveDigest(title, r);
+      setSave({ status: 'saved' });
+      setArchiveVersion((v) => v + 1);
+    } catch (err) {
+      setSave({ status: 'error', message: (err as Error).message });   // 숨기지 않고 화면에 표시
+    }
+  }
+
   async function start(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
+    const title = file.name;
     setError('');
     setResult(null);
     setJob(null);
+    setSave({ status: 'idle' });
     setPhase('uploading');
     try {
       const jobId = await uploadVideo(file);
@@ -61,6 +82,7 @@ export default function VideoSummarizer() {
             if (timer.current) clearInterval(timer.current);
             setResult(j.result);
             setPhase('done');
+            autoSave(title, j.result);
           } else if (j.status === 'error') {
             fail('처리 중 오류: ' + (j.error ?? '알 수 없는 오류'));
           }
@@ -90,10 +112,25 @@ export default function VideoSummarizer() {
         <p>영상을 통째로 LLM에 넣지 않고, 핵심 장면의 텍스트만으로 요약해 토큰을 아낍니다.</p>
       </header>
 
-      {/* 1. 업로드 */}
+      {/* 1. 업로드 / 보관함 탭 */}
       <section className="win">
-        <div className="win-title">📼 동영상 업로드</div>
-        <form className="win-body" onSubmit={start}>
+        <div className="win-title tabs" role="tablist" aria-label="메뉴">
+          <button type="button" role="tab" id="tab-upload" aria-controls="panel-upload" aria-selected={tab === 'upload'}
+            className={'tab' + (tab === 'upload' ? ' on' : '')} onClick={() => setTab('upload')}>
+            📼 동영상 업로드{busy && tab !== 'upload' ? ' ⏳' : ''}
+          </button>
+          <button type="button" role="tab" id="tab-archive" aria-controls="panel-archive" aria-selected={tab === 'archive'}
+            className={'tab' + (tab === 'archive' ? ' on' : '')} onClick={() => setTab('archive')}>
+            🗂 보관함
+          </button>
+        </div>
+        {tab === 'archive' && (
+          <div role="tabpanel" id="panel-archive" aria-labelledby="tab-archive">
+            <Archive refreshKey={archiveVersion} />
+          </div>
+        )}
+        <form className="win-body" onSubmit={start} role="tabpanel" id="panel-upload" aria-labelledby="tab-upload"
+          hidden={tab !== 'upload'}>
           <label
             className={'drop' + (dragOver ? ' over' : '')}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -116,8 +153,8 @@ export default function VideoSummarizer() {
         </form>
       </section>
 
-      {/* 2. 진행 상태 */}
-      {phase !== 'idle' && !(phase === 'error' && !job) && (
+      {/* 2. 진행 상태 (업로드 탭에서만 표시, 탭을 바꿔도 처리는 계속됨) */}
+      {tab === 'upload' && phase !== 'idle' && !(phase === 'error' && !job) && (
         <section className="win" aria-live="polite">
           <div className="win-title">⏳ 처리 진행 상황</div>
           <div className="win-body">
@@ -141,7 +178,16 @@ export default function VideoSummarizer() {
         </section>
       )}
 
-      {result && <Results r={result} />}
+      {tab === 'upload' && result && (
+        <>
+          <p className={'save-status ' + save.status} role="status">
+            {save.status === 'saving' && '🗂 보관함에 저장 중…'}
+            {save.status === 'saved' && <>🗂 보관함에 저장했어요. <button type="button" className="link" onClick={() => setTab('archive')}>보관함 열기 →</button></>}
+            {save.status === 'error' && `⚠ 보관함 저장 실패: ${save.message}`}
+          </p>
+          <Results r={result} />
+        </>
+      )}
     </main>
   );
 }
