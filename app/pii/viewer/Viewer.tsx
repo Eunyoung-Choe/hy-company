@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { piiLabel } from '@/lib/pii';
 import { openDemoWindow } from '@/lib/piiWindows';
 
@@ -79,12 +79,26 @@ export default function Viewer() {
   }, []);
   const openDemo = () => setDemoBlocked(!openDemoWindow());
 
+  // 토스트: 화면 아래쪽에 잠깐 떴다가 사라지는 알림
+  const [toast, setToast] = useState<{ text: string; kind: 'info' | 'rec' | 'ok' | 'error'; id: number } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (text: string, kind: 'info' | 'rec' | 'ok' | 'error' = 'info') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ text, kind, id: Date.now() });
+    toastTimer.current = setTimeout(() => setToast(null), 3000);
+  };
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+
   const save = async (name: string) => {
     try {
       const r = await saveRecording(name);
       setRecNote(r === 'saved' ? `저장했습니다: ${name}` : r === 'cancel' ? '저장을 취소했습니다. 아래 버튼으로 다시 저장할 수 있어요.' : null);
+      if (r === 'saved') showToast('녹화 파일을 저장했습니다', 'ok');
+      else if (r === 'cancel') showToast('저장을 취소했습니다', 'info');
+      else showToast('녹화 파일을 내려받습니다', 'ok');
     } catch (e) {
       setRecError(e instanceof Error ? e.message : '저장 실패');
+      showToast('녹화 파일 저장에 실패했습니다', 'error');
     }
   };
 
@@ -99,10 +113,18 @@ export default function Viewer() {
       if (!r.ok) throw new Error(r.status === 403 ? '허용되지 않은 주소입니다 (ALLOWED_ORIGINS 확인)' : `HTTP ${r.status}`);
       const s = (await r.json()) as Status;
       setStatus(s);
-      if (s.recording_error) setRecError(s.recording_error);
-      else if (!on && s.last_recording) saved = s.last_recording;
+      if (s.recording_error) {
+        setRecError(s.recording_error);
+        showToast(on ? '녹화를 시작하지 못했습니다' : s.recording_error, 'error');
+      } else if (on) {
+        showToast('● 녹화가 시작됐습니다', 'rec');
+      } else {
+        showToast('■ 녹화가 종료됐습니다', 'ok');
+        if (s.last_recording) saved = s.last_recording;
+      }
     } catch (e) {
       setRecError(e instanceof Error ? e.message : '녹화 전환 실패');
+      showToast(on ? '녹화를 시작하지 못했습니다' : '녹화를 종료하지 못했습니다', 'error');
     } finally {
       setRecBusy(false);
     }
@@ -172,6 +194,11 @@ export default function Viewer() {
 
   return (
     <div className="viewer">
+      {toast && (
+        <div key={toast.id} className={`toast ${toast.kind}`} role="status" aria-live="polite">
+          {toast.text}
+        </div>
+      )}
       <div className="screen">
         {online && !sharing ? (
           <div className="screen-empty">
