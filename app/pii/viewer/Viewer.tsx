@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { piiLabel } from '@/lib/pii';
+import { openDemoWindow } from '@/lib/piiWindows';
 
 const AGENT = (process.env.NEXT_PUBLIC_AGENT_URL || 'http://127.0.0.1:8765').replace(/\/$/, '');
 
@@ -23,6 +24,7 @@ type Status = {
   recording_sec: number;
   last_recording: string | null;
   recording_error: string | null;
+  masking: boolean;
 };
 
 // 크롬·엣지의 '다른 이름으로 저장' 창 (File System Access API). TS 기본 타입에 없어 직접 선언
@@ -70,6 +72,12 @@ export default function Viewer() {
   const [recBusy, setRecBusy] = useState(false);
   const [recError, setRecError] = useState<string | null>(null);
   const [recNote, setRecNote] = useState<string | null>(null);
+  // 첫 화면 바로가기에서 팝업이 막혀 데모 창을 못 연 경우 (?demo=blocked)
+  const [demoBlocked, setDemoBlocked] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('demo') === 'blocked') setDemoBlocked(true);
+  }, []);
+  const openDemo = () => setDemoBlocked(!openDemoWindow());
 
   const save = async (name: string) => {
     try {
@@ -99,6 +107,21 @@ export default function Viewer() {
       setRecBusy(false);
     }
     if (saved) await save(saved); // 녹화 종료 → 바로 '다른 이름으로 저장' 창
+  };
+
+  // 마스킹 켜기/끄기 (끄면 원본을 그대로 송출 — 비교 시연용)
+  const setMasking = async (on: boolean) => {
+    setBusy(true);
+    setToggleError(null);
+    try {
+      const r = await fetch(`${AGENT}/control?masking=${on ? 'on' : 'off'}`, { method: 'POST', cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status === 403 ? '허용되지 않은 주소입니다 (ALLOWED_ORIGINS 확인)' : `HTTP ${r.status}`);
+      setStatus((await r.json()) as Status);
+    } catch (e) {
+      setToggleError(e instanceof Error ? e.message : '전환 실패');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const setSharing = async (on: boolean) => {
@@ -145,6 +168,7 @@ export default function Viewer() {
   const sharing = status?.sharing ?? true;
   const verifying = status && (!status.ocr_ready || status.pending_regions > 0);
   const recording = !!status?.recording;
+  const masking = status?.masking ?? true;
 
   return (
     <div className="viewer">
@@ -169,14 +193,25 @@ export default function Viewer() {
           </div>
         )}
         {online && recording && <span className="rec-badge">● REC {mmss(status?.recording_sec ?? 0)}</span>}
-        {online && sharing && (
+        {online && sharing && (masking ? (
           <span className={`badge ${verifying ? 'warn' : 'ok'}`}>
             {verifying ? '화면 갱신 중 (검증 대기)' : '검증 완료'}
           </span>
-        )}
+        ) : (
+          <span className="badge danger">⚠ 마스킹 꺼짐 · 원본 송출 중</span>
+        ))}
       </div>
 
       <aside className="panel">
+        <div className="demo-open">
+          <button type="button" onClick={openDemo}>🗔 데모 창 열기 (왼쪽 절반)</button>
+          {demoBlocked && (
+            <p className="toggle-error">
+              팝업이 차단돼 데모 창을 열지 못했어요. 주소창 오른쪽의 팝업 차단 아이콘에서 허용하거나 위 버튼을 눌러 주세요.
+            </p>
+          )}
+        </div>
+
         <div className="remote-toggle">
           <span className={`dot ${online && sharing ? 'on' : 'off'}`} />
           <strong>원격 {online ? (sharing ? 'ON' : 'OFF') : '연결 안 됨'}</strong>
@@ -187,6 +222,18 @@ export default function Viewer() {
             onClick={() => setSharing(!sharing)}
           >
             {busy ? '전환 중…' : sharing ? '원격 끄기' : '원격 켜기'}
+          </button>
+        </div>
+        <div className="remote-toggle">
+          <span className={`dot ${online && masking ? 'on' : 'off'}`} />
+          <strong>마스킹 {online ? (masking ? 'ON' : 'OFF') : '-'}</strong>
+          <button
+            type="button"
+            className={masking ? 'btn-off' : 'btn-on'}
+            disabled={!online || busy}
+            onClick={() => setMasking(!masking)}
+          >
+            {busy ? '전환 중…' : masking ? '마스킹 끄기' : '마스킹 켜기'}
           </button>
         </div>
         {toggleError && <p className="toggle-error">{toggleError}</p>}
