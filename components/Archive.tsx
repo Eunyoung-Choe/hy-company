@@ -38,7 +38,7 @@ export default function Archive({ refreshKey }: { refreshKey: number }) {
   useEffect(() => { load(); }, [load, refreshKey]);
 
   async function remove(d: Digest) {
-    if (!window.confirm(`"${d.title}" 기록을 삭제할까요?\n공유 보관함이라 다른 사람에게서도 사라져요.`)) return;
+    if (!window.confirm('기록을 삭제하시겠습니까?')) return;
     setDeleting(d.id);
     setError('');
     try {
