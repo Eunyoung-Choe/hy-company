@@ -261,3 +261,20 @@ class DigitGapOcrNoise(unittest.TestCase):
         self.assertEqual(kinds("4111 1111 1111 1111"), ["CARD"])
         self.assertEqual(kinds("010 1234 5678"), ["PHONE"])
         self.assertEqual(kinds("가입일 2024 03 02"), [])
+
+
+class WrappedAccount(unittest.TestCase):
+    """계좌번호가 줄바꿈으로 '110-123-' | '456789' 두 줄에 걸친 경우 (Tahoma 글꼴 데모 메모에서 실측)."""
+
+    def test_line_end_chain(self):
+        t = "환불은 신한은행 110-123-"
+        self.assertIn(("ACCOUNT_PART", t.index("110"), len(t)), find_spans(t))
+
+    def test_next_line_head_is_masked(self):
+        from pii_guard.detect import detect_words
+        lines = [[("환불은", (10, 10, 60, 30)), ("신한은행", (66, 10, 130, 30)), ("110-123-", (136, 10, 220, 30))],
+                 [("456789", (10, 40, 70, 60)), ("로", (76, 40, 90, 60)), ("진행.", (96, 40, 130, 60))]]
+        hits = detect_words(lines, pad=0)
+        heads = [h for h in hits if h.box[1] >= 40]
+        self.assertTrue(heads and heads[0].box[0] <= 10 and heads[0].box[2] >= 70, hits)
+        self.assertFalse(any(h.box[0] >= 76 and h.box[1] >= 40 for h in hits))  # '로 진행.'은 가리지 않음

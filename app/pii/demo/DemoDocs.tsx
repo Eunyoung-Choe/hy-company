@@ -95,42 +95,52 @@ export default function DemoDocs() {
 
   return (
     <div className="demo">
-      <div className="demo-bar" style={{ justifyContent: 'flex-end' }}>
-        <button type="button" onClick={() => setC(randomCustomer())}>새 고객 불러오기</button>
+      <div className="demo-bar">
+        <button type="button" className="btn" onClick={() => setC(randomCustomer())}>새 고객 불러오기</button>
       </div>
 
-      <section className="doc">
-        <h3>고객 기본정보</h3>
-        <Field label="고객명" value={c.name} />
-        <Field label="주민등록번호" value={c.rrn} />
-        <Field label="연락처" value={c.phone} />
-        <Field label="주소" value={c.address} />
+      <section className="win doc">
+        <div className="win-title">👤 고객 기본정보</div>
+        <div className="win-body">
+          <Field label="고객명" value={c.name} />
+          <Field label="주민등록번호" value={c.rrn} />
+          <Field label="연락처" value={c.phone} />
+          <Field label="주소" value={c.address} />
+        </div>
       </section>
 
-      <section className="doc">
-        <h3>결제 수단</h3>
-        <Field label="카드번호" value={c.card} />
-        <Field label="유효기간" value={c.expiry} />
-        <Field label="CVC" value={c.cvc} />
+      <section className="win doc">
+        <div className="win-title">💳 결제 수단</div>
+        <div className="win-body">
+          <Field label="카드번호" value={c.card} />
+          <Field label="유효기간" value={c.expiry} />
+          <Field label="CVC" value={c.cvc} />
+        </div>
       </section>
 
-      <section className="doc">
-        <h3>환불 계좌</h3>
-        <Field label="은행" value={c.bank} />
-        <Field label="계좌번호" value={c.account} />
+      <section className="win doc">
+        <div className="win-title">🏦 환불 계좌</div>
+        <div className="win-body">
+          <Field label="은행" value={c.bank} />
+          <Field label="계좌번호" value={c.account} />
+        </div>
       </section>
 
-      <section className="doc otp">
-        <h3>본인 인증</h3>
-        <p>OTP {c.otp}</p>
+      <section className="win doc">
+        <div className="win-title">🔐 본인 인증</div>
+        <div className="win-body">
+          <p className="otp-value">OTP {c.otp}</p>
+        </div>
       </section>
 
-      <section className="doc">
-        <h3>상담 메모</h3>
-        <p>
-          고객 {c.name}님 주민번호 {c.rrn} 본인 확인 완료. 환불은 {c.bank} {c.account} 로 진행.
-          연락처 {c.phone} 로 결과 안내 예정.
-        </p>
+      <section className="win doc">
+        <div className="win-title">📝 상담 메모</div>
+        <div className="win-body">
+          <p className="doc-text">
+            고객 {c.name}님 주민번호 {c.rrn} 본인 확인 완료. 환불은 {c.bank} {c.account} 로 진행.
+            연락처 {c.phone} 로 결과 안내 예정.
+          </p>
+        </div>
       </section>
     </div>
   );

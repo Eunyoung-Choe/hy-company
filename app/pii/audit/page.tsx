@@ -1,6 +1,7 @@
 import { connection } from 'next/server';
 import { AUDIT_BUCKET, getSupabaseAdmin, type AuditLog } from '@/lib/supabase-admin';
 import { piiLabel } from '@/lib/pii';
+import PiiHeader from '../PiiHeader';
 
 export const metadata = { title: '감사 로그' };
 
@@ -31,12 +32,16 @@ export default async function AuditPage() {
   const result = await loadLogs();
 
   return (
-    <main className="page wide">
-      <h1>감사 로그</h1>
-      <p className="lead">개인정보가 감지된 시점의 <strong>마스킹 완성본</strong>만 저장됩니다. 인식된 텍스트는 저장하지 않습니다.</p>
+    <main className="desk wide">
+      <PiiHeader lead="감사 로그">
+        개인정보가 감지된 시점의 <strong>마스킹 완성본</strong>만 저장됩니다. 인식된 텍스트는 저장하지 않습니다.
+      </PiiHeader>
+      <section className="win">
+        <div className="win-title">🗂 감지 기록</div>
+        <div className="win-body">
 
       {!result.configured ? (
-        <div className="card notice">
+        <div className="notice">
           <strong>Supabase 서버 키가 설정되지 않았습니다.</strong>
           <p>
             <code>.env.local</code>에 <code>NEXT_PUBLIC_SUPABASE_URL</code>과 <code>SUPABASE_SECRET_KEY</code>를 넣고
@@ -44,13 +49,13 @@ export default async function AuditPage() {
           </p>
         </div>
       ) : 'error' in result && result.error ? (
-        <div className="card notice error">조회 실패: {result.error}</div>
+        <p className="alert" role="alert">조회 실패: {result.error}</p>
       ) : result.logs.length === 0 ? (
-        <div className="card notice">아직 기록이 없습니다. 에이전트를 실행하고 데모 자료를 띄워 보세요.</div>
+        <p className="empty">아직 기록이 없습니다. 에이전트를 실행하고 데모 자료를 띄워 보세요.</p>
       ) : (
         <ul className="audit-grid">
           {result.logs.map((l) => (
-            <li key={l.id} className="card audit-item">
+            <li key={l.id} className="audit-item">
               {l.url ? (
                 <a href={l.url} target="_blank" rel="noreferrer">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -59,16 +64,20 @@ export default async function AuditPage() {
               ) : (
                 <div className="img-missing">이미지 없음</div>
               )}
-              <div className="chips">
-                {l.pii_types.map((k) => <span key={k} className="chip">{piiLabel(k)}</span>)}
+              <div className="audit-meta">
+                <div className="chips">
+                  {l.pii_types.map((k) => <span key={k} className="chip">{piiLabel(k)}</span>)}
+                </div>
+                <small className="muted">
+                  {new Date(l.detected_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · {l.session_id} · 박스 {l.box_count}개
+                </small>
               </div>
-              <small className="muted">
-                {new Date(l.detected_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} · {l.session_id} · 박스 {l.box_count}개
-              </small>
             </li>
           ))}
         </ul>
       )}
+        </div>
+      </section>
     </main>
   );
 }
