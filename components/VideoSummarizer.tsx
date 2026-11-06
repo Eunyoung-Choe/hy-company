@@ -15,7 +15,8 @@ const usd = (v: number) => '$' + (Math.abs(v) < 0.01 ? v.toFixed(4) : v.toFixed(
 
 type Phase = 'idle' | 'uploading' | 'processing' | 'done' | 'error';
 
-export default function VideoSummarizer() {
+/** headerAction: 소개 문구 줄 오른쪽 끝에 놓을 버튼 등 (예: PII Guard 바로가기) */
+export default function VideoSummarizer({ headerAction }: { headerAction?: React.ReactNode }) {
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -106,10 +107,14 @@ export default function VideoSummarizer() {
   return (
     <main className="desk">
       <header className="masthead">
-        <h1 className="logo">
-          <Image src="/videodigest-logo.png" alt="VideoDigest" width={90} height={90} priority />
+        <h1 className="brand">
+          <Image src="/videodigest-logo.png" alt="" width={90} height={90} priority />
+          <span>NUNKKAL</span>
         </h1>
-        <p>영상을 통째로 LLM에 넣지 않고, 핵심 장면의 텍스트만으로 요약해 토큰을 아낍니다.</p>
+        <div className="masthead-row">
+          <p>영상을 통째로 LLM에 넣지 않고, 핵심 장면의 텍스트만으로 요약해 토큰을 아낍니다.</p>
+          {headerAction}
+        </div>
       </header>
 
       {/* 1. 업로드 / 보관함 탭 */}

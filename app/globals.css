@@ -30,9 +30,18 @@ h1, h2, p { margin: 0; }
 
 .masthead { margin-bottom: 20px; }
 .masthead h1 { font-size: 30px; letter-spacing: -0.5px; }
-.masthead h1.logo { line-height: 0; }
-.masthead h1.logo img { width: 90px; height: 90px; display: block; }
-.masthead p { color: var(--ink-2); margin-top: 4px; }
+.masthead h1.brand { display: flex; align-items: center; gap: 14px; line-height: 1; }
+.masthead h1.brand img { width: 90px; height: 90px; display: block; flex: none; }
+.masthead h1.brand span {
+  font-size: 40px; font-weight: bold; letter-spacing: 3px; color: var(--green-dark);
+  text-shadow: 3px 3px 0 var(--track);   /* 레트로 그림자 */
+}
+.masthead-row { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; margin-top: 6px; }
+.masthead p { color: var(--ink-2); }
+
+/* PII Guard 바로가기: 기본 .btn(입체 테두리) + 초록 포인트 */
+.pii-launch { padding: 6px 14px; font-size: 13px; color: var(--green); white-space: nowrap; }
+.pii-launch:not(:disabled):hover { color: var(--green-dark); }
 
 /* 창(window) 패널 */
 .win {
