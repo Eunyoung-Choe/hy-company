@@ -30,7 +30,8 @@ h1, h2, p { margin: 0; }
 
 .masthead { margin-bottom: 20px; }
 .masthead h1 { font-size: 30px; letter-spacing: -0.5px; }
-.masthead h1 span { color: var(--green); }
+.masthead h1.logo { line-height: 0; }
+.masthead h1.logo img { width: 90px; height: 90px; display: block; }
 .masthead p { color: var(--ink-2); margin-top: 4px; }
 
 /* 창(window) 패널 */
