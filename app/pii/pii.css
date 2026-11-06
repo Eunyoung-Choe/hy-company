@@ -117,3 +117,18 @@
 .pii .demo-open { display: grid; gap: 6px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
 .pii .demo-open button { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
 .pii .demo-open .toggle-error { margin: 0; }
+
+/* 토스트 알림 */
+.pii .toast { position: fixed; left: 50%; bottom: 32px; z-index: 100; transform: translateX(-50%);
+  padding: 12px 20px; border-radius: 10px; color: #fff; font-size: 14px; font-weight: 600;
+  background: #1f2937; box-shadow: 0 8px 24px rgba(0,0,0,.22); pointer-events: none;
+  animation: pii-toast 3s ease forwards; }
+.pii .toast.rec { background: #dc2626; }   /* 녹화 시작 = 빨간 REC 느낌 */
+.pii .toast.ok { background: #15803d; }
+.pii .toast.error { background: #7f1d1d; }
+@keyframes pii-toast {
+  0% { opacity: 0; transform: translate(-50%, 12px); }
+  8%, 85% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 6px); }
+}
+@media (prefers-reduced-motion: reduce) { .pii .toast { animation: none; } }
